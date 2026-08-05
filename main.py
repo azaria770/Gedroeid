@@ -6,27 +6,36 @@ import requests
 import pandas as pd
 import flet as ft
 
-# נתיב בטוח לשמירת קבצים מקומיים - באנדרואיד זה יצביע לתיקיית הקבצים הפנימית והקבועה של האפליקציה
-SAVE_DIR = os.path.expanduser("~")
-SAVE_FILE = os.path.join(SAVE_DIR, "gedroeid_saved_data.json")
+# חיפוש חכם של תיקייה מורשית כתיבה באנדרואיד (נבדק בפועל בזמן אמת)
+def get_safe_storage_path():
+    candidates = [
+        os.environ.get("HOME", ""),
+        os.environ.get("TMPDIR", ""),
+        os.path.expanduser("~"),
+        "/storage/emulated/0/Download", 
+        os.path.dirname(os.path.abspath(__file__)),
+        os.getcwd()
+    ]
+    
+    for path in candidates:
+        if not path: 
+            continue
+        try:
+            if not os.path.exists(path):
+                os.makedirs(path, exist_ok=True)
+            
+            # בדיקת הרשאת כתיבה בפועל
+            test_file = os.path.join(path, ".test_write")
+            with open(test_file, "w") as f:
+                f.write("ok")
+            os.remove(test_file)
+            return os.path.join(path, "gedroeid_save_data.json")
+        except Exception:
+            continue
+            
+    return "gedroeid_save_data.json" # ברירת מחדל אחרונה
 
-def load_local_state():
-    """קורא את הנתונים השמורים מהקובץ המקומי"""
-    try:
-        if os.path.exists(SAVE_FILE):
-            with open(SAVE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        pass
-    return {}
-
-def save_local_state(state):
-    """שומר את הנתונים לקובץ מקומי קבוע"""
-    try:
-        with open(SAVE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False)
-    except Exception as e:
-        pass
+SAVE_FILE = get_safe_storage_path()
 
 def safe_to_float(value):
     """ממיר ערך טקסטואלי למספר בצורה בטוחה (כולל אחוזים ופסיקים)."""
@@ -175,8 +184,14 @@ def main(page: ft.Page):
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
 
-    # ניהול מצב (State) - קריאת נתונים מקובץ מקומי במקום זיכרון זמני
-    local_state = load_local_state()
+    # קריאת נתונים מקובץ מקומי 
+    local_state = {}
+    try:
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, "r", encoding="utf-8") as f:
+                local_state = json.load(f)
+    except Exception:
+        pass
     
     df_clean = pd.DataFrame()
     added_funds = local_state.get("added_funds", [])
@@ -188,6 +203,7 @@ def main(page: ft.Page):
 
     # רכיבי UI
     status_text = ft.Text("⏳ מוריד נתונים עדכניים ממשרד האוצר... אנא המתן.", color=ft.Colors.ORANGE_700, weight=ft.FontWeight.BOLD)
+    debug_text = ft.Text(f"מצב שמירה: ממתין לשינויים... ({SAVE_FILE})", size=10, color=ft.Colors.GREY_400)
     
     search_field = ft.TextField(
         label="הקלד שם מסלול או מספר קופה...",
@@ -211,20 +227,29 @@ def main(page: ft.Page):
     ]
 
     def save_state():
-        """אורז את הנתונים הנוכחיים וכותב אותם לקובץ"""
+        """אורז את הנתונים הנוכחיים וכותב אותם לקובץ עם משוב בזמן אמת"""
         state_dict = {
             "added_funds": added_funds,
             "invested_funds": list(invested_funds),
             "sort_column_idx": sort_column_idx,
             "sort_ascending": sort_ascending
         }
-        save_local_state(state_dict)
+        try:
+            with open(SAVE_FILE, "w", encoding="utf-8") as f:
+                json.dump(state_dict, f, ensure_ascii=False)
+            debug_text.value = f"✅ נשמר בהצלחה בנתיב: {SAVE_FILE}"
+            debug_text.color = ft.Colors.GREY_400
+        except Exception as e:
+            debug_text.value = f"❌ שגיאת הרשאות כתיבה לאנדרואיד: {str(e)}"
+            debug_text.color = ft.Colors.RED_500
+        
+        page.update()
 
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
         sort_column_idx = e.column_index
         sort_ascending = e.ascending
-        save_state() # שמירת בחירת המיון של המשתמש לקובץ
+        save_state()
         refresh_table()
 
     # יצירת טבלה
@@ -415,7 +440,8 @@ def main(page: ft.Page):
                 ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900)
             ], wrap=True),
             ft.Text("💡 טיפ: גלול ימינה ושמאלה לצפייה בטבלה. סמן שורה ולחץ 'מחק נבחרים' למחיקה. לחץ על הכוכב לסימון קופה מושקעת.", size=12, color=ft.Colors.GREY_500),
-            table_container
+            table_container,
+            debug_text
         ], expand=True)
     )
 
