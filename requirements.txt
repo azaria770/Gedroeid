@@ -1,2 +1,4 @@
 requests
 pandas
+flet==0.86.5
+
