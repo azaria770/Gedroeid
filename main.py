@@ -152,25 +152,14 @@ def main(page: ft.Page):
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
 
-    # ניהול מצב (State)
+    # ניהול מצב (State) - הסתמכות על זיכרון פייתון בלבד
     df_clean = pd.DataFrame()
     added_funds = []
     invested_funds = set()
     funds_list = []
     
-    # החלפת client_storage ב-session
-    sort_column_idx = page.session.get("sortColumn") or 3
-    sort_ascending = page.session.get("sortAscending")
-    if sort_ascending is None:
-        sort_ascending = False
-
-    saved_funds_data = page.session.get("savedFunds")
-    if saved_funds_data:
-        added_funds = json.loads(saved_funds_data)
-        
-    invested_funds_data = page.session.get("investedFunds")
-    if invested_funds_data:
-        invested_funds = set(json.loads(invested_funds_data))
+    sort_column_idx = 3
+    sort_ascending = False
 
     # רכיבי UI
     status_text = ft.Text("⏳ מוריד נתונים עדכניים ממשרד האוצר... אנא המתן.", color=ft.colors.ORANGE_700, weight=ft.FontWeight.BOLD)
@@ -200,8 +189,6 @@ def main(page: ft.Page):
         nonlocal sort_column_idx, sort_ascending
         sort_column_idx = e.column_index
         sort_ascending = e.ascending
-        page.session.set("sortColumn", sort_column_idx)
-        page.session.set("sortAscending", sort_ascending)
         refresh_table()
 
     # יצירת טבלה
@@ -225,8 +212,7 @@ def main(page: ft.Page):
     table_container = ft.Row([data_table], scroll=ft.ScrollMode.ALWAYS, expand=True)
 
     def save_state():
-        page.session.set("savedFunds", json.dumps(added_funds))
-        page.session.set("investedFunds", json.dumps(list(invested_funds)))
+        pass # בוטל מנגנון השמירה כדי למנוע קריסות באנדרואיד. המידע נשמר בזיכרון המקומי
 
     def toggle_invested(fund_name):
         if fund_name in invested_funds:
