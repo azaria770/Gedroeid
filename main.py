@@ -179,7 +179,7 @@ def process_data(df):
 
 def main(page: ft.Page):
     page.title = "השוואת קופות גמל להשקעה"
-    page.rtl = True # תמיכה מושלמת בעברית!
+    page.rtl = True
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
@@ -198,7 +198,7 @@ def main(page: ft.Page):
     invested_funds = set(local_state.get("invested_funds", []))
     funds_list = []
     
-    sort_column_idx = local_state.get("sort_column_idx", 3)
+    sort_column_idx = local_state.get("sort_column_idx", 1) # ברירת מחדל: ציון חכם
     sort_ascending = local_state.get("sort_ascending", False)
 
     # רכיבי UI
@@ -214,8 +214,50 @@ def main(page: ft.Page):
     
     search_results_column = ft.Column(visible=False)
 
+    # יועץ השקעות חכם - רכיבי פרופיל
+    horizon_dropdown = ft.Dropdown(
+        label="טווח השקעה מתוכנן",
+        options=[
+            ft.dropdown.Option("קצר (עד 3 שנים)"), 
+            ft.dropdown.Option("בינוני (3-5 שנים)"), 
+            ft.dropdown.Option("ארוך (5+ שנים)")
+        ],
+        value=local_state.get("horizon", "בינוני (3-5 שנים)"),
+        on_change=lambda e: update_profile(),
+        expand=True
+    )
+    
+    risk_dropdown = ft.Dropdown(
+        label="רמת סיכון מועדפת",
+        options=[
+            ft.dropdown.Option("סולידי (סיכון נמוך)"), 
+            ft.dropdown.Option("מאוזן (סיכון בינוני)"), 
+            ft.dropdown.Option("אגרסיבי (סיכון גבוה)")
+        ],
+        value=local_state.get("risk", "מאוזן (סיכון בינוני)"),
+        on_change=lambda e: update_profile(),
+        expand=True
+    )
+    
+    advisor_text = ft.Text("הוסף קופות לטבלה כדי לקבל המלצה חכמה.", color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD)
+    
+    advisor_card = ft.Card(
+        elevation=2,
+        content=ft.Container(
+            padding=15,
+            bgcolor=ft.Colors.BLUE_50,
+            content=ft.Column([
+                ft.Text("🤖 יועץ השקעות אישי", weight=ft.FontWeight.BOLD, size=18, color=ft.Colors.BLUE_900),
+                ft.Text("בחר את הפרופיל שלך והמערכת תחשב 'ציון חכם' (0-100) לכל קופה בטבלה:", size=13),
+                ft.Row([horizon_dropdown, risk_dropdown]),
+                advisor_text
+            ])
+        )
+    )
+
     col_specs = [
         ('שם ומספר מסלול', False),
+        ('ציון חכם', False),
         ('תשואה חודש אחרון', True),
         ('תשואה 12 חודשים אחרונים', True),
         ('תשואה שנה אחרונה', True),
@@ -227,12 +269,13 @@ def main(page: ft.Page):
     ]
 
     def save_state():
-        """אורז את הנתונים הנוכחיים וכותב אותם לקובץ עם משוב בזמן אמת"""
         state_dict = {
             "added_funds": added_funds,
             "invested_funds": list(invested_funds),
             "sort_column_idx": sort_column_idx,
-            "sort_ascending": sort_ascending
+            "sort_ascending": sort_ascending,
+            "horizon": horizon_dropdown.value,
+            "risk": risk_dropdown.value
         }
         try:
             with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -245,6 +288,10 @@ def main(page: ft.Page):
         
         page.update()
 
+    def update_profile():
+        save_state()
+        refresh_table()
+
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
         sort_column_idx = e.column_index
@@ -252,13 +299,12 @@ def main(page: ft.Page):
         save_state()
         refresh_table()
 
-    # יצירת טבלה
     columns = []
     for i, (col_name, _) in enumerate(col_specs):
         columns.append(
             ft.DataColumn(
                 ft.Text(col_name, weight=ft.FontWeight.BOLD),
-                on_sort=on_sort if i < 8 else None
+                on_sort=on_sort if i < 9 else None
             )
         )
 
@@ -287,10 +333,86 @@ def main(page: ft.Page):
         data_table.sort_column_index = sort_column_idx
         data_table.sort_ascending = sort_ascending
 
-        # מיון הנתונים
+        valid_funds = [f for f in added_funds if not df_clean[df_clean['שם ומספר מסלול'] == f].empty]
+        
+        # חישוב סטטיסטיקות עבור השוואה וממוצעים
+        stats = {}
+        for col_name, _ in col_specs:
+            if col_name in ['שם ומספר מסלול', 'מושקע', 'ציון חכם']: continue
+            vals = [safe_to_float(df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0].get(col_name)) for f in valid_funds]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                stats[col_name] = {'min': min(vals), 'max': max(vals), 'avg': sum(vals)/len(vals)}
+            else:
+                stats[col_name] = {'min': 0, 'max': 0, 'avg': 0}
+
+        # מציאת המצטיינים לתגים (Badges)
+        def get_winner(col):
+            if not valid_funds: return None
+            best_f, max_v = None, -9999
+            for f in valid_funds:
+                v = safe_to_float(df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0].get(col))
+                if v is not None and v > max_v:
+                    max_v = v; best_f = f
+            return best_f
+
+        winners = {
+            'king': get_winner('תשואה 5 שנים') or get_winner('תשואה 3 שנים'),
+            'stable': get_winner('מדד שארפ'),
+            'rocket': get_winner('תשואה 12 חודשים אחרונים')
+        }
+
+        # הגדרת משקלים לציון החכם לפי פרופיל
+        h_val, r_val = horizon_dropdown.value, risk_dropdown.value
+        w_12m, w_3y, w_5y, w_sharpe = 0.1, 0.4, 0.3, 0.2
+        
+        if "קצר" in h_val: w_12m, w_3y, w_5y = 0.4, 0.4, 0.0
+        elif "ארוך" in h_val: w_12m, w_3y, w_5y = 0.0, 0.3, 0.5
+            
+        if "סולידי" in r_val:
+            w_sharpe += 0.3; w_12m = max(0, w_12m-0.1); w_3y = max(0, w_3y-0.1); w_5y = max(0, w_5y-0.1)
+        elif "אגרסיבי" in r_val:
+            w_sharpe = 0.0; w_12m += 0.05; w_3y += 0.1; w_5y += 0.05
+            
+        # נרמול ל-1.0
+        total_w = w_12m + w_3y + w_5y + w_sharpe
+        if total_w > 0: w_12m /= total_w; w_3y /= total_w; w_5y /= total_w; w_sharpe /= total_w
+
+        # חישוב הציון לכל קופה
+        scores = {}
+        for f in valid_funds:
+            score = 0
+            def norm(val, stat):
+                if val is None or stat['max'] == stat['min']: return 50
+                return 100 * (val - stat['min']) / (stat['max'] - stat['min'])
+                
+            row = df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0]
+            v_12m = safe_to_float(row.get('תשואה 12 חודשים אחרונים'))
+            v_3y = safe_to_float(row.get('תשואה 3 שנים'))
+            v_5y = safe_to_float(row.get('תשואה 5 שנים'))
+            v_sh = safe_to_float(row.get('מדד שארפ'))
+            
+            score += w_12m * norm(v_12m, stats.get('תשואה 12 חודשים אחרונים', {'min':0, 'max':0}))
+            score += w_3y * norm(v_3y, stats.get('תשואה 3 שנים', {'min':0, 'max':0}))
+            score += w_5y * norm(v_5y, stats.get('תשואה 5 שנים', {'min':0, 'max':0}))
+            score += w_sharpe * norm(v_sh, stats.get('מדד שארפ', {'min':0, 'max':0}))
+            scores[f] = score
+
+        if scores:
+            best_f = max(scores, key=scores.get)
+            advisor_text.value = f"🎯 המסלול המומלץ ביותר עבורך: {best_f} (ציון: {scores[best_f]:.0f}/100)"
+            advisor_text.color = ft.Colors.GREEN_700
+        else:
+            advisor_text.value = "הוסף קופות לטבלה כדי לקבל המלצה חכמה."
+            advisor_text.color = ft.Colors.BLUE_700
+
+        # מיון הנתונים לטבלה
         sort_col_name = col_specs[sort_column_idx][0]
         
         def get_sort_val(fund_name):
+            if sort_col_name == 'ציון חכם': return scores.get(fund_name, -999.0)
+            if sort_col_name == 'מושקע': return 1 if fund_name in invested_funds else 0
+            
             row = df_clean[df_clean['שם ומספר מסלול'] == fund_name]
             if row.empty: return -999.0
             val = safe_to_float(row.iloc[0].get(sort_col_name))
@@ -313,26 +435,47 @@ def main(page: ft.Page):
                     cells.append(ft.DataCell(ft.IconButton(icon=icon, icon_color=color, on_click=lambda e, fn=fund_name: toggle_invested(fn))))
                     continue
                     
+                if col_name == 'ציון חכם':
+                    sc = scores.get(fund_name, 0)
+                    color = ft.Colors.GREEN_600 if sc >= 80 else ft.Colors.ORANGE_600 if sc >= 50 else ft.Colors.RED_600
+                    cells.append(ft.DataCell(ft.Text(f"{sc:.0f}", color=color, weight=ft.FontWeight.BOLD)))
+                    continue
+
                 if col_name == 'שם ומספר מסלול':
-                    cells.append(ft.DataCell(ft.Text(fund_name, width=200)))
+                    badges = []
+                    if fund_name == winners['king']: badges.append("🌟")
+                    if fund_name == winners['stable']: badges.append("🛡️")
+                    if fund_name == winners['rocket']: badges.append("🚀")
+                    disp = fund_name + (" " + "".join(badges) if badges else "")
+                    cells.append(ft.DataCell(ft.Text(disp, width=200)))
                     continue
 
                 val = fund_row.get(col_name, None)
                 num_val = safe_to_float(val)
                 
                 if num_val is None:
-                    display_text = "---"
-                    text_color = ft.Colors.BLACK
+                    cells.append(ft.DataCell(ft.Text("---", color=ft.Colors.BLACK)))
                 else:
+                    avg = stats.get(col_name, {}).get('avg', None)
+                    is_above_avg = avg is not None and num_val > avg
+                    is_below_avg = avg is not None and num_val < avg
+                    
                     display_text = f"{num_val:.2f}%" if is_percent else f"{num_val:.2f}"
-                    if num_val > 0:
-                        text_color = ft.Colors.GREEN_600
-                    elif num_val < 0:
-                        text_color = ft.Colors.RED_600
+                    
+                    # חיווי אוטומטי לעומת ממוצע הענף (רק אם יש יותר מקופה אחת להשוואה)
+                    if len(valid_funds) > 1:
+                        if is_above_avg:
+                            display_text += " ▲"
+                            text_color = ft.Colors.GREEN_600
+                        elif is_below_avg:
+                            display_text += " ▼"
+                            text_color = ft.Colors.RED_600
+                        else:
+                            text_color = ft.Colors.BLACK
                     else:
-                        text_color = ft.Colors.BLACK
+                        text_color = ft.Colors.GREEN_600 if num_val > 0 else ft.Colors.RED_600 if num_val < 0 else ft.Colors.BLACK
 
-                cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
+                    cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
             
             row_color = ft.Colors.GREEN_50 if fund_name in invested_funds else ft.Colors.TRANSPARENT
             rows.append(ft.DataRow(cells=cells, data=fund_name, color=row_color))
@@ -427,19 +570,22 @@ def main(page: ft.Page):
         
         page.update()
 
+    legend_text = ft.Text("מקרא תגים: 🌟 מלך הביצועים (3/5 שנים) | 🛡️ הכי יציבה (שארפ) | 🚀 צומחת (חודש אחרון) | ▲/▼ מעל/מתחת לממוצע", size=11, color=ft.Colors.GREY_600)
+
     # עיצוב המסך הראשי
     page.add(
         ft.Column([
             ft.Text("📊 השוואת קופות גמל להשקעה", size=24, weight=ft.FontWeight.BOLD),
             ft.Text("הנתונים נמשכים בזמן אמת ממאגרי משרד האוצר", size=14, color=ft.Colors.GREY_600),
             status_text,
+            advisor_card,
             search_field,
             search_results_column,
             ft.Row([
                 ft.ElevatedButton("➖ מחק נבחרים", on_click=remove_selected, bgcolor=ft.Colors.ORANGE_50, color=ft.Colors.ORANGE_900),
                 ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900)
             ], wrap=True),
-            ft.Text("💡 טיפ: גלול ימינה ושמאלה לצפייה בטבלה. סמן שורה ולחץ 'מחק נבחרים' למחיקה. לחץ על הכוכב לסימון קופה מושקעת.", size=12, color=ft.Colors.GREY_500),
+            legend_text,
             table_container,
             debug_text
         ], expand=True)
