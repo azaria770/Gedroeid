@@ -158,17 +158,17 @@ def main(page: ft.Page):
     invested_funds = set()
     funds_list = []
     
-    sort_column_idx = page.client_storage.get("sortColumn") or 3
-    sort_ascending = page.client_storage.get("sortAscending")
+    # החלפת client_storage ב-session
+    sort_column_idx = page.session.get("sortColumn") or 3
+    sort_ascending = page.session.get("sortAscending")
     if sort_ascending is None:
         sort_ascending = False
 
-    # טעינת נתונים שמורים מ-SharedPreferences של אנדרואיד
-    saved_funds_data = page.client_storage.get("savedFunds")
+    saved_funds_data = page.session.get("savedFunds")
     if saved_funds_data:
         added_funds = json.loads(saved_funds_data)
         
-    invested_funds_data = page.client_storage.get("investedFunds")
+    invested_funds_data = page.session.get("investedFunds")
     if invested_funds_data:
         invested_funds = set(json.loads(invested_funds_data))
 
@@ -193,15 +193,15 @@ def main(page: ft.Page):
         ('תשואה 5 שנים', True),
         ('ממוצע תשואות', True),
         ('מדד שארפ', False),
-        ('מושקע', False) # עמודה חדשה כפתור לאנדרואיד במקום לחיצה כפולה
+        ('מושקע', False) 
     ]
 
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
         sort_column_idx = e.column_index
         sort_ascending = e.ascending
-        page.client_storage.set("sortColumn", sort_column_idx)
-        page.client_storage.set("sortAscending", sort_ascending)
+        page.session.set("sortColumn", sort_column_idx)
+        page.session.set("sortAscending", sort_ascending)
         refresh_table()
 
     # יצירת טבלה
@@ -216,7 +216,7 @@ def main(page: ft.Page):
 
     data_table = ft.DataTable(
         columns=columns,
-        show_checkbox_column=True, # בחירה מרובה למחיקה
+        show_checkbox_column=True, 
         sort_column_index=sort_column_idx,
         sort_ascending=sort_ascending,
         heading_row_color=ft.colors.BLUE_GREY_50,
@@ -225,8 +225,8 @@ def main(page: ft.Page):
     table_container = ft.Row([data_table], scroll=ft.ScrollMode.ALWAYS, expand=True)
 
     def save_state():
-        page.client_storage.set("savedFunds", json.dumps(added_funds))
-        page.client_storage.set("investedFunds", json.dumps(list(invested_funds)))
+        page.session.set("savedFunds", json.dumps(added_funds))
+        page.session.set("investedFunds", json.dumps(list(invested_funds)))
 
     def toggle_invested(fund_name):
         if fund_name in invested_funds:
@@ -290,7 +290,6 @@ def main(page: ft.Page):
 
                 cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
             
-            # צבע רקע לשורה המושקעת
             row_color = ft.colors.GREEN_50 if fund_name in invested_funds else ft.colors.TRANSPARENT
             rows.append(ft.DataRow(cells=cells, data=fund_name, color=row_color))
 
@@ -309,7 +308,7 @@ def main(page: ft.Page):
     def update_search_suggestions(query):
         search_results_column.controls.clear()
         if query and len(query) >= 2:
-            matches = [f for f in funds_list if query in f][:10] # הצג עד 10 תוצאות במובייל
+            matches = [f for f in funds_list if query in f][:10]
             for match in matches:
                 search_results_column.controls.append(
                     ft.ListTile(
@@ -364,7 +363,6 @@ def main(page: ft.Page):
                     status_text.color = ft.colors.GREEN_700
                     search_field.disabled = False
                     
-                    # מסיר קופות שמורות שכבר לא קיימות
                     missing = [f for f in added_funds if f not in funds_list]
                     for m in missing:
                         added_funds.remove(m)
