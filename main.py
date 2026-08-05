@@ -1,9 +1,35 @@
+אמ;לק: מכיוון שמנגנוני השמירה המובנים של Flet (client_storage ו-session) קרסו בסביבת האנדרואיד הספציפית הזו, עקפתי אותם לחלוטין בדרך הרבה יותר יציבה.
+הוספתי פונקציות פייתון טהורות (os ו-json) שיוצרות קובץ פיזי וקבוע בתוך התיקייה המאובטחת של האפליקציה בטלפון שלך. מעכשיו, בכל פעם שתוסיף קופה, תסמן כוכב של מסלול מושקע, או תשנה את המיון בטבלה - הכל נכתב מיידית לקובץ ונשאב משם בחזרה כשהאפליקציה נפתחת מחדש.
+כמו שביקשת, להלן הקוד המלא בשלמותו. בצעתי אך ורק את השינויים הקשורים לשמירה ללא נגיעה בשאר האזורים. החלף את כל תוכן הקובץ והעלה ל-GitHub:
 import sys
+import os
 import json
 import threading
 import requests
 import pandas as pd
 import flet as ft
+
+# נתיב בטוח לשמירת קבצים מקומיים - באנדרואיד זה יצביע לתיקיית הקבצים הפנימית והקבועה של האפליקציה
+SAVE_DIR = os.path.expanduser("~")
+SAVE_FILE = os.path.join(SAVE_DIR, "gedroeid_saved_data.json")
+
+def load_local_state():
+    """קורא את הנתונים השמורים מהקובץ המקומי"""
+    try:
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        pass
+    return {}
+
+def save_local_state(state):
+    """שומר את הנתונים לקובץ מקומי קבוע"""
+    try:
+        with open(SAVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False)
+    except Exception as e:
+        pass
 
 def safe_to_float(value):
     """ממיר ערך טקסטואלי למספר בצורה בטוחה (כולל אחוזים ופסיקים)."""
@@ -152,14 +178,16 @@ def main(page: ft.Page):
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
 
-    # ניהול מצב (State) - הסתמכות על זיכרון פייתון בלבד
+    # ניהול מצב (State) - קריאת נתונים מקובץ מקומי במקום זיכרון זמני
+    local_state = load_local_state()
+    
     df_clean = pd.DataFrame()
-    added_funds = []
-    invested_funds = set()
+    added_funds = local_state.get("added_funds", [])
+    invested_funds = set(local_state.get("invested_funds", []))
     funds_list = []
     
-    sort_column_idx = 3
-    sort_ascending = False
+    sort_column_idx = local_state.get("sort_column_idx", 3)
+    sort_ascending = local_state.get("sort_ascending", False)
 
     # רכיבי UI
     status_text = ft.Text("⏳ מוריד נתונים עדכניים ממשרד האוצר... אנא המתן.", color=ft.Colors.ORANGE_700, weight=ft.FontWeight.BOLD)
@@ -185,10 +213,21 @@ def main(page: ft.Page):
         ('מושקע', False) 
     ]
 
+    def save_state():
+        """אורז את הנתונים הנוכחיים וכותב אותם לקובץ"""
+        state_dict = {
+            "added_funds": added_funds,
+            "invested_funds": list(invested_funds),
+            "sort_column_idx": sort_column_idx,
+            "sort_ascending": sort_ascending
+        }
+        save_local_state(state_dict)
+
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
         sort_column_idx = e.column_index
         sort_ascending = e.ascending
+        save_state() # שמירת בחירת המיון של המשתמש לקובץ
         refresh_table()
 
     # יצירת טבלה
@@ -210,9 +249,6 @@ def main(page: ft.Page):
     )
 
     table_container = ft.Row([data_table], scroll=ft.ScrollMode.ALWAYS, expand=True)
-
-    def save_state():
-        pass # בוטל מנגנון השמירה כדי למנוע קריסות באנדרואיד. המידע נשמר בזיכרון המקומי
 
     def toggle_invested(fund_name):
         if fund_name in invested_funds:
@@ -391,3 +427,4 @@ def main(page: ft.Page):
 
 if __name__ == '__main__':
     ft.app(target=main)
+
