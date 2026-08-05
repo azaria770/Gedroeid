@@ -162,7 +162,7 @@ def main(page: ft.Page):
     sort_ascending = False
 
     # רכיבי UI
-    status_text = ft.Text("⏳ מוריד נתונים עדכניים ממשרד האוצר... אנא המתן.", color=ft.colors.ORANGE_700, weight=ft.FontWeight.BOLD)
+    status_text = ft.Text("⏳ מוריד נתונים עדכניים ממשרד האוצר... אנא המתן.", color=ft.Colors.ORANGE_700, weight=ft.FontWeight.BOLD)
     
     search_field = ft.TextField(
         label="הקלד שם מסלול או מספר קופה...",
@@ -206,7 +206,7 @@ def main(page: ft.Page):
         show_checkbox_column=True, 
         sort_column_index=sort_column_idx,
         sort_ascending=sort_ascending,
-        heading_row_color=ft.colors.BLUE_GREY_50,
+        heading_row_color=ft.Colors.BLUE_GREY_50,
     )
 
     table_container = ft.Row([data_table], scroll=ft.ScrollMode.ALWAYS, expand=True)
@@ -250,8 +250,8 @@ def main(page: ft.Page):
             for col_idx, (col_name, is_percent) in enumerate(col_specs):
                 if col_name == 'מושקע':
                     is_inv = fund_name in invested_funds
-                    icon = ft.icons.STAR if is_inv else ft.icons.STAR_BORDER
-                    color = ft.colors.AMBER if is_inv else ft.colors.GREY
+                    icon = ft.Icons.STAR if is_inv else ft.Icons.STAR_BORDER
+                    color = ft.Colors.AMBER if is_inv else ft.Colors.GREY
                     cells.append(ft.DataCell(ft.IconButton(icon=icon, icon_color=color, on_click=lambda e, fn=fund_name: toggle_invested(fn))))
                     continue
                     
@@ -264,19 +264,19 @@ def main(page: ft.Page):
                 
                 if num_val is None:
                     display_text = "---"
-                    text_color = ft.colors.BLACK
+                    text_color = ft.Colors.BLACK
                 else:
                     display_text = f"{num_val:.2f}%" if is_percent else f"{num_val:.2f}"
                     if num_val > 0:
-                        text_color = ft.colors.GREEN_600
+                        text_color = ft.Colors.GREEN_600
                     elif num_val < 0:
-                        text_color = ft.colors.RED_600
+                        text_color = ft.Colors.RED_600
                     else:
-                        text_color = ft.colors.BLACK
+                        text_color = ft.Colors.BLACK
 
                 cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
             
-            row_color = ft.colors.GREEN_50 if fund_name in invested_funds else ft.colors.TRANSPARENT
+            row_color = ft.Colors.GREEN_50 if fund_name in invested_funds else ft.Colors.TRANSPARENT
             rows.append(ft.DataRow(cells=cells, data=fund_name, color=row_color))
 
         data_table.rows = rows
@@ -346,7 +346,7 @@ def main(page: ft.Page):
                 if not df_clean.empty:
                     funds_list = df_clean['שם ומספר מסלול'].dropna().astype(str).drop_duplicates().tolist()
                     status_text.value = "✅ הנתונים נטענו בהצלחה!"
-                    status_text.color = ft.colors.GREEN_700
+                    status_text.color = ft.Colors.GREEN_700
                     search_field.disabled = False
                     
                     missing = [f for f in added_funds if f not in funds_list]
@@ -359,13 +359,13 @@ def main(page: ft.Page):
                     refresh_table()
                 else:
                     status_text.value = "❌ לא נמצאו נתונים."
-                    status_text.color = ft.colors.RED_600
+                    status_text.color = ft.Colors.RED_600
             else:
                 status_text.value = "❌ נכשל ניסיון משיכת הנתונים מ-data.gov.il"
-                status_text.color = ft.colors.RED_600
+                status_text.color = ft.Colors.RED_600
         except Exception as e:
             status_text.value = f"❌ שגיאה: {str(e)}"
-            status_text.color = ft.colors.RED_600
+            status_text.color = ft.Colors.RED_600
         
         page.update()
 
@@ -373,15 +373,15 @@ def main(page: ft.Page):
     page.add(
         ft.Column([
             ft.Text("📊 השוואת קופות גמל להשקעה", size=24, weight=ft.FontWeight.BOLD),
-            ft.Text("הנתונים נמשכים בזמן אמת ממאגרי משרד האוצר", size=14, color=ft.colors.GREY_600),
+            ft.Text("הנתונים נמשכים בזמן אמת ממאגרי משרד האוצר", size=14, color=ft.Colors.GREY_600),
             status_text,
             search_field,
             search_results_column,
             ft.Row([
-                ft.ElevatedButton("➖ מחק נבחרים", on_click=remove_selected, bgcolor=ft.colors.ORANGE_50, color=ft.colors.ORANGE_900),
-                ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.colors.RED_50, color=ft.colors.RED_900)
+                ft.ElevatedButton("➖ מחק נבחרים", on_click=remove_selected, bgcolor=ft.Colors.ORANGE_50, color=ft.Colors.ORANGE_900),
+                ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900)
             ], wrap=True),
-            ft.Text("💡 טיפ: גלול ימינה ושמאלה לצפייה בטבלה. סמן שורה ולחץ 'מחק נבחרים' למחיקה. לחץ על הכוכב לסימון קופה מושקעת.", size=12, color=ft.colors.GREY_500),
+            ft.Text("💡 טיפ: גלול ימינה ושמאלה לצפייה בטבלה. סמן שורה ולחץ 'מחק נבחרים' למחיקה. לחץ על הכוכב לסימון קופה מושקעת.", size=12, color=ft.Colors.GREY_500),
             table_container
         ], expand=True)
     )
