@@ -336,73 +336,72 @@ def main(page: ft.Page):
     delete_btn.on_click = on_delete_btn_click
     cancel_delete_btn.on_click = on_cancel_delete_click
 
-    # --- מנגנון יצוא ויבוא אוטומטי (ללא FilePicker) ---
-    def export_to_downloads(e):
-        try:
-            download_dir = "/storage/emulated/0/Download"
-            if not os.path.exists(download_dir):
-                download_dir = os.path.expanduser("~") 
-
-            backup_path = os.path.join(download_dir, "gedroeid_backup.json")
-            state_dict = {
-                "added_funds": added_funds,
-                "invested_funds": list(invested_funds),
-                "sort_column_idx": sort_column_idx,
-                "sort_ascending": sort_ascending,
-                "horizon": horizon_dropdown.value,
-                "risk": risk_dropdown.value
-            }
-            with open(backup_path, "w", encoding="utf-8") as f:
-                json.dump(state_dict, f, ensure_ascii=False)
-
-            status_text.value = f"✅ הגדרות גובו בהצלחה לתיקיית ההורדות (Download)!"
-            status_text.color = ft.Colors.GREEN_700
-        except Exception as ex:
-            status_text.value = f"❌ שגיאה ביצוא: {str(ex)}"
-            status_text.color = ft.Colors.RED_600
-        page.update()
-
-    def import_from_downloads(e):
-        try:
-            download_dir = "/storage/emulated/0/Download"
-            if not os.path.exists(download_dir):
-                download_dir = os.path.expanduser("~") 
-
-            backup_path = os.path.join(download_dir, "gedroeid_backup.json")
+    # --- מנגנון יצוא ויבוא מתוקן ---
+    def on_export_result(e: ft.FilePickerResultEvent):
+        state_dict = {
+            "added_funds": added_funds,
+            "invested_funds": list(invested_funds),
+            "sort_column_idx": sort_column_idx,
+            "sort_ascending": sort_ascending,
+            "horizon": horizon_dropdown.value,
+            "risk": risk_dropdown.value
+        }
+        json_str = json.dumps(state_dict, ensure_ascii=False)
+        
+        if e.path:
+            try:
+                with open(e.path, "w", encoding="utf-8") as f:
+                    f.write(json_str)
+                status_text.value = f"✅ הגדרות גובו בהצלחה למיקום הנבחר!"
+                status_text.color = ft.Colors.GREEN_700
+            except Exception as ex:
+                page.set_clipboard(json_str)
+                status_text.value = "⚠️ שגיאת הרשאה בשמירה. הנתונים הועתקו ללוח (Clipboard)!"
+                status_text.color = ft.Colors.ORANGE_700
+        else:
+            page.set_clipboard(json_str)
+            status_text.value = "⚠️ בחירת מיקום בוטלה. הנתונים הועתקו ללוח!"
+            status_text.color = ft.Colors.ORANGE_700
             
-            if not os.path.exists(backup_path):
-                status_text.value = "❌ קובץ הגיבוי לא נמצא בתיקיית ההורדות."
-                status_text.color = ft.Colors.RED_600
-                page.update()
-                return
-
-            with open(backup_path, "r", encoding="utf-8") as f:
-                imported_state = json.load(f)
-
-            nonlocal sort_column_idx, sort_ascending
-            added_funds.clear()
-            added_funds.extend(imported_state.get("added_funds", []))
-            invested_funds.clear()
-            invested_funds.update(imported_state.get("invested_funds", []))
-
-            sort_column_idx = imported_state.get("sort_column_idx", sort_column_idx)
-            sort_ascending = imported_state.get("sort_ascending", sort_ascending)
-
-            if "horizon" in imported_state:
-                horizon_dropdown.value = imported_state["horizon"]
-            if "risk" in imported_state:
-                risk_dropdown.value = imported_state["risk"]
-
-            save_state()
-            refresh_table()
-
-            status_text.value = "✅ ההגדרות יובאו בהצלחה מתיקיית ההורדות!"
-            status_text.color = ft.Colors.GREEN_700
-        except Exception as ex:
-            status_text.value = f"❌ שגיאה ביבוא: {str(ex)}"
-            status_text.color = ft.Colors.RED_600
         page.update()
 
+    export_picker = ft.FilePicker()
+    export_picker.on_result = on_export_result
+    page.overlay.append(export_picker)
+
+    def on_import_result(e: ft.FilePickerResultEvent):
+        if e.files and len(e.files) > 0:
+            try:
+                with open(e.files[0].path, "r", encoding="utf-8") as f:
+                    imported_state = json.load(f)
+
+                nonlocal sort_column_idx, sort_ascending
+                added_funds.clear()
+                added_funds.extend(imported_state.get("added_funds", []))
+                invested_funds.clear()
+                invested_funds.update(imported_state.get("invested_funds", []))
+
+                sort_column_idx = imported_state.get("sort_column_idx", sort_column_idx)
+                sort_ascending = imported_state.get("sort_ascending", sort_ascending)
+
+                if "horizon" in imported_state:
+                    horizon_dropdown.value = imported_state["horizon"]
+                if "risk" in imported_state:
+                    risk_dropdown.value = imported_state["risk"]
+
+                save_state()
+                refresh_table()
+
+                status_text.value = "✅ ההגדרות יובאו בהצלחה!"
+                status_text.color = ft.Colors.GREEN_700
+            except Exception as ex:
+                status_text.value = f"❌ שגיאה ביבוא: {str(ex)}"
+                status_text.color = ft.Colors.RED_600
+            page.update()
+
+    import_picker = ft.FilePicker()
+    import_picker.on_result = on_import_result
+    page.overlay.append(import_picker)
 
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
@@ -588,11 +587,10 @@ def main(page: ft.Page):
 
                     cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
 
-            row_color = ft.Colors.GREEN_50 if fund_name in invested_funds else ft.Colors.TRANSPARENT
+            # הוסר צבע הרקע כדי למנוע דריסה של צבעי הטקסט באנדרואיד
             rows.append(ft.DataRow(
                 cells=cells, 
-                data=fund_name, 
-                color=row_color,
+                data=fund_name,
                 selected=(fund_name in current_selected),
                 on_select_change=on_row_select
             ))
@@ -695,8 +693,8 @@ def main(page: ft.Page):
                 delete_btn,
                 cancel_delete_btn,
                 ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900),
-                ft.ElevatedButton("📤 יצוא ל-Download", on_click=export_to_downloads, bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900),
-                ft.ElevatedButton("📥 יבוא הגדרות", on_click=import_from_downloads, bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900)
+                ft.ElevatedButton("📤 יצוא הגדרות", on_click=lambda _: export_picker.save_file(file_name="gedroeid_backup.json"), bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900),
+                ft.ElevatedButton("📥 יבוא הגדרות", on_click=lambda _: import_picker.pick_files(file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=["json"]), bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900)
             ], wrap=True),
             legend_text,
             table_container,
