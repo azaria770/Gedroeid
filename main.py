@@ -323,7 +323,6 @@ def main(page: ft.Page):
         page.update()
 
     def on_row_select(e):
-        # טיפול קשיח בערך הבוליאני שמגיע מ-Flet באנדרואיד כדי למנוע קריאה שגויה של הסטטוס
         is_selected = str(e.data).lower() in ["true", "1", "t", "yes"]
         e.control.selected = is_selected
 
@@ -337,7 +336,7 @@ def main(page: ft.Page):
     delete_btn.on_click = on_delete_btn_click
     cancel_delete_btn.on_click = on_cancel_delete_click
 
-    # --- מנגנון יצוא ויבוא ---
+    # --- מנגנון יצוא ויבוא אוטומטי (ללא FilePicker) ---
     def export_to_downloads(e):
         try:
             download_dir = "/storage/emulated/0/Download"
@@ -363,41 +362,47 @@ def main(page: ft.Page):
             status_text.color = ft.Colors.RED_600
         page.update()
 
-    def on_import_result(e: ft.FilePickerResultEvent):
-        if e.files and len(e.files) > 0:
-            try:
-                with open(e.files[0].path, "r", encoding="utf-8") as f:
-                    imported_state = json.load(f)
+    def import_from_downloads(e):
+        try:
+            download_dir = "/storage/emulated/0/Download"
+            if not os.path.exists(download_dir):
+                download_dir = os.path.expanduser("~") 
 
-                nonlocal sort_column_idx, sort_ascending
-                added_funds.clear()
-                added_funds.extend(imported_state.get("added_funds", []))
-                invested_funds.clear()
-                invested_funds.update(imported_state.get("invested_funds", []))
-
-                sort_column_idx = imported_state.get("sort_column_idx", sort_column_idx)
-                sort_ascending = imported_state.get("sort_ascending", sort_ascending)
-
-                if "horizon" in imported_state:
-                    horizon_dropdown.value = imported_state["horizon"]
-                if "risk" in imported_state:
-                    risk_dropdown.value = imported_state["risk"]
-
-                save_state()
-                refresh_table()
-
-                status_text.value = "✅ ההגדרות יובאו בהצלחה!"
-                status_text.color = ft.Colors.GREEN_700
-            except Exception as ex:
-                status_text.value = f"❌ שגיאה ביבוא: {str(ex)}"
+            backup_path = os.path.join(download_dir, "gedroeid_backup.json")
+            
+            if not os.path.exists(backup_path):
+                status_text.value = "❌ קובץ הגיבוי לא נמצא בתיקיית ההורדות."
                 status_text.color = ft.Colors.RED_600
-            page.update()
+                page.update()
+                return
 
-    # יצירת ה-FilePicker והשמת on_result בשורה נפרדת למניעת שגיאת unexpected keyword argument
-    import_picker = ft.FilePicker()
-    import_picker.on_result = on_import_result
-    
-    page.overlay.append(import_picker)
+            with open(backup_path, "r", encoding="utf-8") as f:
+                imported_state = json.load(f)
+
+            nonlocal sort_column_idx, sort_ascending
+            added_funds.clear()
+            added_funds.extend(imported_state.get("added_funds", []))
+            invested_funds.clear()
+            invested_funds.update(imported_state.get("invested_funds", []))
+
+            sort_column_idx = imported_state.get("sort_column_idx", sort_column_idx)
+            sort_ascending = imported_state.get("sort_ascending", sort_ascending)
+
+            if "horizon" in imported_state:
+                horizon_dropdown.value = imported_state["horizon"]
+            if "risk" in imported_state:
+                risk_dropdown.value = imported_state["risk"]
+
+            save_state()
+            refresh_table()
+
+            status_text.value = "✅ ההגדרות יובאו בהצלחה מתיקיית ההורדות!"
+            status_text.color = ft.Colors.GREEN_700
+        except Exception as ex:
+            status_text.value = f"❌ שגיאה ביבוא: {str(ex)}"
+            status_text.color = ft.Colors.RED_600
+        page.update()
+
 
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
@@ -691,7 +696,7 @@ def main(page: ft.Page):
                 cancel_delete_btn,
                 ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900),
                 ft.ElevatedButton("📤 יצוא ל-Download", on_click=export_to_downloads, bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900),
-                ft.ElevatedButton("📥 יבוא הגדרות", on_click=lambda _: import_picker.pick_files(file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=["json"]), bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900)
+                ft.ElevatedButton("📥 יבוא הגדרות", on_click=import_from_downloads, bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900)
             ], wrap=True),
             legend_text,
             table_container,
