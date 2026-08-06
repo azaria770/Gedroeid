@@ -594,7 +594,7 @@ def main(page: ft.Page):
                 data=fund_name, 
                 color=row_color,
                 selected=(fund_name in current_selected),
-                on_select_changed=on_row_select
+                on_select_change=on_row_select
             ))
 
         data_table.rows = rows
