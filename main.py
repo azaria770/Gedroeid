@@ -223,7 +223,6 @@ def main(page: ft.Page):
             ft.dropdown.Option("ארוך (5+ שנים)")
         ],
         value=local_state.get("horizon", "בינוני (3-5 שנים)"),
-        on_change=lambda e: update_profile(),
         expand=True
     )
     
@@ -235,7 +234,6 @@ def main(page: ft.Page):
             ft.dropdown.Option("אגרסיבי (סיכון גבוה)")
         ],
         value=local_state.get("risk", "מאוזן (סיכון בינוני)"),
-        on_change=lambda e: update_profile(),
         expand=True
     )
     
@@ -291,6 +289,10 @@ def main(page: ft.Page):
     def update_profile():
         save_state()
         refresh_table()
+
+    # הגדרת פונקציות השינוי לרכיבי הבחירה אחרי שהפונקציה update_profile קיימת
+    horizon_dropdown.on_change = lambda e: update_profile()
+    risk_dropdown.on_change = lambda e: update_profile()
 
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
