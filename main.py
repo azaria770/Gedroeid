@@ -305,6 +305,111 @@ def main(page: ft.Page):
     horizon_dropdown.on_change = lambda e: update_profile()
     risk_dropdown.on_change = lambda e: update_profile()
 
+    # --- מנגנון בחירה ומחיקה חכם ---
+    delete_btn = ft.ElevatedButton("➖ בחר מסלולים למחיקה", bgcolor=ft.Colors.ORANGE_50, color=ft.Colors.ORANGE_900)
+    cancel_delete_btn = ft.ElevatedButton("❌ ביטול מצב מחיקה", bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLACK, visible=False)
+
+    def on_delete_btn_click(e):
+        if not data_table.show_checkbox_column:
+            # מעבר למצב בחירה
+            data_table.show_checkbox_column = True
+            delete_btn.text = "⏳ ממתין לבחירת מסלולים..."
+            cancel_delete_btn.visible = True
+            page.update()
+        else:
+            # מחיקה בפועל אם נבחרו שורות
+            selected_funds = [row.data for row in data_table.rows if row.selected]
+            if selected_funds:
+                for f in selected_funds:
+                    if f in added_funds:
+                        added_funds.remove(f)
+                    if f in invested_funds:
+                        invested_funds.remove(f)
+                
+                # חזרה למצב רגיל
+                data_table.show_checkbox_column = False
+                delete_btn.text = "➖ בחר מסלולים למחיקה"
+                cancel_delete_btn.visible = False
+                save_state()
+                refresh_table()
+
+    def on_cancel_delete_click(e):
+        data_table.show_checkbox_column = False
+        delete_btn.text = "➖ בחר מסלולים למחיקה"
+        cancel_delete_btn.visible = False
+        for row in data_table.rows:
+            row.selected = False
+        page.update()
+        
+    def on_row_select(e):
+        e.control.selected = (e.data == "true")
+        selected_count = sum(1 for row in data_table.rows if row.selected)
+        if selected_count > 0:
+            delete_btn.text = "🗑️ מחק מסלולים נבחרים"
+        else:
+            delete_btn.text = "⏳ ממתין לבחירת מסלולים..."
+        page.update()
+
+    delete_btn.on_click = on_delete_btn_click
+    cancel_delete_btn.on_click = on_cancel_delete_click
+
+    # --- יצוא ויבוא הגדרות (File Pickers) ---
+    def on_export_result(e: ft.FilePickerResultEvent):
+        if e.path:
+            try:
+                state_dict = {
+                    "added_funds": added_funds,
+                    "invested_funds": list(invested_funds),
+                    "sort_column_idx": sort_column_idx,
+                    "sort_ascending": sort_ascending,
+                    "horizon": horizon_dropdown.value,
+                    "risk": risk_dropdown.value
+                }
+                with open(e.path, "w", encoding="utf-8") as f:
+                    json.dump(state_dict, f, ensure_ascii=False)
+                status_text.value = f"✅ ההגדרות יוצאו בהצלחה!"
+                status_text.color = ft.Colors.GREEN_700
+                page.update()
+            except Exception as ex:
+                status_text.value = f"❌ שגיאה ביצוא: {str(ex)}"
+                status_text.color = ft.Colors.RED_600
+                page.update()
+
+    def on_import_result(e: ft.FilePickerResultEvent):
+        if e.files and len(e.files) > 0:
+            try:
+                with open(e.files[0].path, "r", encoding="utf-8") as f:
+                    imported_state = json.load(f)
+                
+                nonlocal sort_column_idx, sort_ascending
+                added_funds.clear()
+                added_funds.extend(imported_state.get("added_funds", []))
+                invested_funds.clear()
+                invested_funds.update(imported_state.get("invested_funds", []))
+                
+                sort_column_idx = imported_state.get("sort_column_idx", sort_column_idx)
+                sort_ascending = imported_state.get("sort_ascending", sort_ascending)
+                
+                if "horizon" in imported_state:
+                    horizon_dropdown.value = imported_state["horizon"]
+                if "risk" in imported_state:
+                    risk_dropdown.value = imported_state["risk"]
+                    
+                save_state()
+                refresh_table()
+                
+                status_text.value = "✅ ההגדרות יובאו בהצלחה!"
+                status_text.color = ft.Colors.GREEN_700
+                page.update()
+            except Exception as ex:
+                status_text.value = f"❌ שגיאה ביבוא: {str(ex)}"
+                status_text.color = ft.Colors.RED_600
+                page.update()
+
+    export_picker = ft.FilePicker(on_result=on_export_result)
+    import_picker = ft.FilePicker(on_result=on_import_result)
+    page.overlay.extend([export_picker, import_picker])
+
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
         sort_column_idx = e.column_index
@@ -323,7 +428,7 @@ def main(page: ft.Page):
 
     data_table = ft.DataTable(
         columns=columns,
-        show_checkbox_column=True, 
+        show_checkbox_column=False, # מתחילים מוסתר עד שלוחצים "בחר מסלולים" 
         sort_column_index=sort_column_idx,
         sort_ascending=sort_ascending,
         heading_row_color=ft.Colors.BLUE_GREY_50,
@@ -437,6 +542,11 @@ def main(page: ft.Page):
 
         sorted_funds = sorted(added_funds, key=get_sort_val, reverse=not sort_ascending)
         
+        # שמירת הבחירה הקיימת לפני רינדור מחדש של השורות
+        current_selected = set()
+        if data_table.rows:
+            current_selected = {row.data for row in data_table.rows if row.selected}
+
         rows = []
         for fund_name in sorted_funds:
             fund_data = df_clean[df_clean['שם ומספר מסלול'] == fund_name]
@@ -495,7 +605,14 @@ def main(page: ft.Page):
                     cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
             
             row_color = ft.Colors.GREEN_50 if fund_name in invested_funds else ft.Colors.TRANSPARENT
-            rows.append(ft.DataRow(cells=cells, data=fund_name, color=row_color))
+            
+            rows.append(ft.DataRow(
+                cells=cells, 
+                data=fund_name, 
+                color=row_color,
+                selected=(fund_name in current_selected),
+                on_select_changed=on_row_select
+            ))
 
         data_table.rows = rows
         page.update()
@@ -525,18 +642,15 @@ def main(page: ft.Page):
             search_results_column.visible = False
         page.update()
 
-    def remove_selected(e):
-        selected_funds = [row.data for row in data_table.rows if row.selected]
-        for f in selected_funds:
-            if f in added_funds:
-                added_funds.remove(f)
-        save_state()
-        refresh_table()
-
     def clear_table(e):
         added_funds.clear()
         invested_funds.clear()
         save_state()
+        
+        # איפוס מצב המחיקה אם הופעל
+        data_table.show_checkbox_column = False
+        delete_btn.text = "➖ בחר מסלולים למחיקה"
+        cancel_delete_btn.visible = False
         refresh_table()
 
     # משיכת נתונים ברקע
@@ -599,8 +713,11 @@ def main(page: ft.Page):
             search_field,
             search_results_column,
             ft.Row([
-                ft.ElevatedButton("➖ מחק נבחרים", on_click=remove_selected, bgcolor=ft.Colors.ORANGE_50, color=ft.Colors.ORANGE_900),
-                ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900)
+                delete_btn,
+                cancel_delete_btn,
+                ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900),
+                ft.ElevatedButton("📤 יצוא הגדרות", on_click=lambda _: export_picker.save_file(file_name="gedroeid_backup.json", allowed_extensions=["json"])),
+                ft.ElevatedButton("📥 יבוא הגדרות", on_click=lambda _: import_picker.pick_files(allowed_extensions=["json"]))
             ], wrap=True),
             legend_text,
             table_container,
