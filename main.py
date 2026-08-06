@@ -1,10 +1,13 @@
 import sys
 import os
 import json
-import threading
+import asyncio
+import tempfile
 import requests
 import pandas as pd
 import flet as ft
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # חיפוש חכם של תיקייה מורשית כתיבה באנדרואיד
 def get_safe_storage_path():
@@ -35,6 +38,78 @@ def get_safe_storage_path():
     return "gedroeid_save_data.json"
 
 SAVE_FILE = get_safe_storage_path()
+CACHE_FILE = os.path.join(os.path.dirname(SAVE_FILE) or os.getcwd(), "gedroeid_cache.json")
+
+
+def normalize_text(value):
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return str(value).strip().casefold()
+
+
+def atomic_write_json(path, payload):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    fd, temp_path = tempfile.mkstemp(prefix=".gedroeid_", suffix=".json", dir=directory or None)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+def load_json_file(path, default=None):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return default
+
+
+def build_retry_session():
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=0.6,
+        status_forcelist=(408, 429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def extract_records(api_response):
+    if not isinstance(api_response, dict):
+        raise ValueError("תגובת API לא תקינה")
+    if not api_response.get("success"):
+        raise ValueError("קריאת ה-API נכשלה")
+
+    result = api_response.get("result")
+    if not isinstance(result, dict):
+        raise ValueError("חסר שדה result בתגובת ה-API")
+
+    records = result.get("records")
+    if not isinstance(records, list):
+        raise ValueError("חסר מערך records בתגובת ה-API")
+
+    return records
 
 def safe_to_float(value):
     if pd.isna(value):
@@ -58,29 +133,32 @@ def process_data(df):
     id_col = 'FUND_ID' if 'FUND_ID' in df.columns else 'ID'
     name_col = 'FUND_NAME' if 'FUND_NAME' in df.columns else 'NAME'
 
+    if id_col not in df.columns or name_col not in df.columns:
+        return pd.DataFrame()
+
     if name_col in df.columns:
-        name_text = df[name_col].astype(str)
-        investment_mask = name_text.str.contains('להשקעה', na=False, regex=False)
+        name_text = df[name_col].astype(str).map(normalize_text)
+        investment_mask = name_text.str.contains(normalize_text('להשקעה'), na=False, regex=False)
         altshuler_saving_mask = (
-            name_text.str.contains('אלטשולר', na=False, regex=False) &
-            name_text.str.contains('חיסכון', na=False, regex=False)
+            name_text.str.contains(normalize_text('אלטשולר'), na=False, regex=False) &
+            name_text.str.contains(normalize_text('חיסכון'), na=False, regex=False)
         )
         df = df[investment_mask | altshuler_saving_mask]
 
     type_candidates = ['SUG_KUPA_DESC', 'SUG_KUPA', 'PRODUCT_TYPE_DESC', 'PRODUCT_TYPE']
     type_col = next((col for col in type_candidates if col in df.columns), None)
     if type_col and not df.empty:
-        type_text = df[type_col].astype(str)
+        type_text = df[type_col].astype(str).map(normalize_text)
         type_mask = (
-            type_text.str.contains('גמל', na=False, regex=False) &
-            type_text.str.contains('להשקעה', na=False, regex=False)
+            type_text.str.contains(normalize_text('גמל'), na=False, regex=False) &
+            type_text.str.contains(normalize_text('להשקעה'), na=False, regex=False)
         )
 
         if name_col in df.columns:
-            name_text = df[name_col].astype(str)
+            name_text = df[name_col].astype(str).map(normalize_text)
             altshuler_saving_mask = (
-                name_text.str.contains('אלטשולר', na=False, regex=False) &
-                name_text.str.contains('חיסכון', na=False, regex=False)
+                name_text.str.contains(normalize_text('אלטשולר'), na=False, regex=False) &
+                name_text.str.contains(normalize_text('חיסכון'), na=False, regex=False)
             )
             df = df[type_mask | altshuler_saving_mask]
         else:
@@ -88,11 +166,11 @@ def process_data(df):
 
     if df.empty and name_col in original_df.columns:
         fallback_name_col = name_col
-        name_text = original_df[fallback_name_col].astype(str)
-        investment_mask = name_text.str.contains('להשקעה', na=False, regex=False)
+        name_text = original_df[fallback_name_col].astype(str).map(normalize_text)
+        investment_mask = name_text.str.contains(normalize_text('להשקעה'), na=False, regex=False)
         altshuler_saving_mask = (
-            name_text.str.contains('אלטשולר', na=False, regex=False) &
-            name_text.str.contains('חיסכון', na=False, regex=False)
+            name_text.str.contains(normalize_text('אלטשולר'), na=False, regex=False) &
+            name_text.str.contains(normalize_text('חיסכון'), na=False, regex=False)
         )
         df = original_df[investment_mask | altshuler_saving_mask]
 
@@ -273,8 +351,7 @@ def main(page: ft.Page):
             "risk": risk_dropdown.value
         }
         try:
-            with open(SAVE_FILE, "w", encoding="utf-8") as f:
-                json.dump(state_dict, f, ensure_ascii=False)
+            atomic_write_json(SAVE_FILE, state_dict)
             debug_text.value = f"✅ נשמר בהצלחה בנתיב: {SAVE_FILE}"
             debug_text.color = ft.Colors.GREY_400
         except Exception as e:
@@ -444,12 +521,18 @@ def main(page: ft.Page):
         data_table.sort_column_index = sort_column_idx
         data_table.sort_ascending = sort_ascending
 
-        valid_funds = [f for f in added_funds if not df_clean[df_clean['שם ומספר מסלול'] == f].empty]
+        fund_index = {
+            str(row['שם ומספר מסלול']): row
+            for _, row in df_clean.iterrows()
+            if not pd.isna(row.get('שם ומספר מסלול'))
+        }
+
+        valid_funds = [f for f in added_funds if f in fund_index]
 
         stats = {}
         for col_name, _ in col_specs:
             if col_name in ['שם ומספר מסלול', 'מושקע', 'ציון חכם']: continue
-            vals = [safe_to_float(df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0].get(col_name)) for f in valid_funds]
+            vals = [safe_to_float(fund_index[f].get(col_name)) for f in valid_funds]
             vals = [v for v in vals if v is not None]
             if vals:
                 stats[col_name] = {'min': min(vals), 'max': max(vals), 'avg': sum(vals)/len(vals)}
@@ -460,7 +543,7 @@ def main(page: ft.Page):
             if not valid_funds: return None
             best_f, max_v = None, -9999
             for f in valid_funds:
-                v = safe_to_float(df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0].get(col))
+                v = safe_to_float(fund_index[f].get(col))
                 if v is not None and v > max_v:
                     max_v = v; best_f = f
             if require_positive and max_v <= 0:
@@ -494,7 +577,7 @@ def main(page: ft.Page):
                 if val is None or stat['max'] == stat['min']: return 50
                 return 100 * (val - stat['min']) / (stat['max'] - stat['min'])
 
-            row = df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0]
+            row = fund_index[f]
             v_12m = safe_to_float(row.get('תשואה 12 חודשים אחרונים'))
             v_3y = safe_to_float(row.get('תשואה 3 שנים'))
             v_5y = safe_to_float(row.get('תשואה 5 שנים'))
@@ -520,9 +603,9 @@ def main(page: ft.Page):
             if sort_col_name == 'ציון חכם': return scores.get(fund_name, -999.0)
             if sort_col_name == 'מושקע': return 1 if fund_name in invested_funds else 0
 
-            row = df_clean[df_clean['שם ומספר מסלול'] == fund_name]
-            if row.empty: return -999.0
-            val = safe_to_float(row.iloc[0].get(sort_col_name))
+            row = fund_index.get(fund_name)
+            if row is None: return -999.0
+            val = safe_to_float(row.get(sort_col_name))
             return val if val is not None else -999.0
 
         sorted_funds = sorted(added_funds, key=get_sort_val, reverse=not sort_ascending)
@@ -533,9 +616,8 @@ def main(page: ft.Page):
 
         rows = []
         for fund_name in sorted_funds:
-            fund_data = df_clean[df_clean['שם ומספר מסלול'] == fund_name]
-            if fund_data.empty: continue
-            fund_row = fund_data.iloc[0]
+            fund_row = fund_index.get(fund_name)
+            if fund_row is None: continue
 
             cells = []
             for col_idx, (col_name, is_percent) in enumerate(col_specs):
@@ -610,7 +692,8 @@ def main(page: ft.Page):
     def update_search_suggestions(query):
         search_results_column.controls.clear()
         if query and len(query) >= 2:
-            matches = [f for f in funds_list if query in f][:10]
+            normalized_query = normalize_text(query)
+            matches = [f for f in funds_list if normalized_query in normalize_text(f)][:10]
             for match in matches:
                 search_results_column.controls.append(
                     ft.ListTile(
@@ -632,50 +715,87 @@ def main(page: ft.Page):
         cancel_delete_btn.visible = False
         refresh_table()
 
-    def fetch_data_task():
+    async def fetch_data_task():
         nonlocal df_clean, funds_list
-        try:
+        
+        def apply_dataframe(new_df, success_message):
+            nonlocal df_clean, funds_list
+            df_clean = new_df
+            funds_list = df_clean['שם ומספר מסלול'].dropna().astype(str).drop_duplicates().tolist()
+
+            missing = [f for f in added_funds if f not in funds_list]
+            for m in missing:
+                added_funds.remove(m)
+                if m in invested_funds:
+                    invested_funds.remove(m)
+
+            search_field.disabled = False
+            status_text.value = success_message
+            status_text.color = ft.Colors.GREEN_700
+
+            save_state()
+            refresh_table()
+
+        def load_cached_dataframe():
+            cached_payload = load_json_file(CACHE_FILE, default=None)
+            if not isinstance(cached_payload, dict):
+                return pd.DataFrame()
+
+            records = cached_payload.get("records")
+            if not isinstance(records, list) or not records:
+                return pd.DataFrame()
+
+            cached_df = pd.DataFrame(records)
+            if 'שם ומספר מסלול' not in cached_df.columns:
+                return pd.DataFrame()
+            return cached_df
+
+        def fetch_remote_dataframe():
+            session = build_retry_session()
             search_url = "https://data.gov.il/api/3/action/package_search?q=title:גמל-נט"
-            res = requests.get(search_url).json()
+            res = session.get(search_url, timeout=(5, 15)).json()
             resource_id = "079cbab3-9c86-455b-b9d9-c454eefbebb6"
 
-            if res.get('success') and res['result']['results']:
-                resources = res['result']['results'][0]['resources']
+            if isinstance(res, dict) and res.get('success') and res.get('result', {}).get('results'):
+                resources = res['result']['results'][0].get('resources', [])
                 for r in resources:
-                    if '2024' in r['name'] or '2025' in r['name'] or 'היום' in r['name']:
-                        resource_id = r['id']
+                    name = str(r.get('name', ''))
+                    if '2024' in name or '2025' in name or 'היום' in name:
+                        resource_id = r.get('id', resource_id)
                         break
 
             url = f"https://data.gov.il/api/3/action/datastore_search?resource_id={resource_id}&limit=40000"
-            data_res = requests.get(url).json()
+            data_res = session.get(url, timeout=(10, 30)).json()
+            records = extract_records(data_res)
+            if not records:
+                raise ValueError("לא התקבלו רשומות מהמאגר")
 
-            if data_res.get('success'):
-                df = pd.DataFrame(data_res['result']['records'])
-                df_clean = process_data(df)
+            return pd.DataFrame(records)
 
-                if not df_clean.empty:
-                    funds_list = df_clean['שם ומספר מסלול'].dropna().astype(str).drop_duplicates().tolist()
-                    status_text.value = "✅ הנתונים נטענו בהצלחה!"
-                    status_text.color = ft.Colors.GREEN_700
-                    search_field.disabled = False
+        try:
+            df = await asyncio.to_thread(fetch_remote_dataframe)
+            processed_df = process_data(df)
 
-                    missing = [f for f in added_funds if f not in funds_list]
-                    for m in missing:
-                        added_funds.remove(m)
-                        if m in invested_funds:
-                            invested_funds.remove(m)
+            if processed_df.empty:
+                raise ValueError("לא נמצאו נתונים מתאימים לאחר הסינון")
 
-                    save_state()
-                    refresh_table()
-                else:
-                    status_text.value = "❌ לא נמצאו נתונים."
-                    status_text.color = ft.Colors.RED_600
-            else:
-                status_text.value = "❌ נכשל ניסיון משיכת הנתונים מ-data.gov.il"
-                status_text.color = ft.Colors.RED_600
+            atomic_write_json(
+                CACHE_FILE,
+                {
+                    "saved_at": pd.Timestamp.utcnow().isoformat(),
+                    "records": processed_df.to_dict(orient='records')
+                }
+            )
+            apply_dataframe(processed_df, "✅ הנתונים נטענו בהצלחה!")
         except Exception as e:
-            status_text.value = f"❌ שגיאה: {str(e)}"
-            status_text.color = ft.Colors.RED_600
+            cached_df = await asyncio.to_thread(load_cached_dataframe)
+            if not cached_df.empty:
+                df_clean = cached_df
+                apply_dataframe(df_clean, f"⚠️ טעינה מהרשת נכשלה, נטען cache מקומי: {str(e)}")
+                status_text.color = ft.Colors.ORANGE_700
+            else:
+                status_text.value = f"❌ שגיאה: {str(e)}"
+                status_text.color = ft.Colors.RED_600
 
         page.update()
 
@@ -702,7 +822,7 @@ def main(page: ft.Page):
         ], expand=True)
     )
 
-    threading.Thread(target=fetch_data_task, daemon=True).start()
+    page.run_task(fetch_data_task)
 
 if __name__ == '__main__':
     ft.app(target=main)
