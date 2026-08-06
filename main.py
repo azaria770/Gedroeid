@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import flet as ft
 
-# חיפוש חכם של תיקייה מורשית כתיבה באנדרואיד (נבדק בפועל בזמן אמת)
+# חיפוש חכם של תיקייה מורשית כתיבה באנדרואיד
 def get_safe_storage_path():
     candidates = [
         os.environ.get("HOME", ""),
@@ -24,7 +24,6 @@ def get_safe_storage_path():
             if not os.path.exists(path):
                 os.makedirs(path, exist_ok=True)
             
-            # בדיקת הרשאת כתיבה בפועל
             test_file = os.path.join(path, ".test_write")
             with open(test_file, "w") as f:
                 f.write("ok")
@@ -33,19 +32,16 @@ def get_safe_storage_path():
         except Exception:
             continue
             
-    return "gedroeid_save_data.json" # ברירת מחדל אחרונה
+    return "gedroeid_save_data.json"
 
 SAVE_FILE = get_safe_storage_path()
 
 def safe_to_float(value):
-    """ממיר ערך טקסטואלי למספר בצורה בטוחה (כולל אחוזים ופסיקים)."""
     if pd.isna(value):
         return None
-
     text = str(value).strip()
     if not text or text == "---":
         return None
-
     text = text.replace('%', '').replace(',', '')
     try:
         return float(text)
@@ -53,7 +49,6 @@ def safe_to_float(value):
         return None
 
 def process_data(df):
-    """לוגיקת עיבוד הנתונים המקורית - נשארה ללא שינוי"""
     if df.empty:
         return df
         
@@ -63,7 +58,6 @@ def process_data(df):
     id_col = 'FUND_ID' if 'FUND_ID' in df.columns else 'ID'
     name_col = 'FUND_NAME' if 'FUND_NAME' in df.columns else 'NAME'
 
-    # סינון קשיח למסלולי גמל להשקעה לפי שם המסלול
     if name_col in df.columns:
         name_text = df[name_col].astype(str)
         investment_mask = name_text.str.contains('להשקעה', na=False, regex=False)
@@ -73,7 +67,6 @@ def process_data(df):
         )
         df = df[investment_mask | altshuler_saving_mask]
 
-    # גיבוי לפורמטים ישנים יותר לפי עמודות סוג מוצר
     type_candidates = ['SUG_KUPA_DESC', 'SUG_KUPA', 'PRODUCT_TYPE_DESC', 'PRODUCT_TYPE']
     type_col = next((col for col in type_candidates if col in df.columns), None)
     if type_col and not df.empty:
@@ -93,7 +86,6 @@ def process_data(df):
         else:
             df = df[type_mask]
 
-    # רשת ביטחון נוספת
     if df.empty and name_col in original_df.columns:
         fallback_name_col = name_col
         name_text = original_df[fallback_name_col].astype(str)
@@ -163,17 +155,14 @@ def process_data(df):
         src = next((col for col in candidates if col in df.columns), None)
         output[label] = df[src] if src else None
 
-    # חישוב תשואה שנתית ממוצעת בראייה של 3/5 שנים (CAGR)
     avg_annual_returns = []
     for _, row in output.iterrows():
         v_5y = safe_to_float(row.get('תשואה 5 שנים'))
         v_3y = safe_to_float(row.get('תשואה 3 שנים'))
         
         if v_5y is not None:
-            # גזירת תשואה שנתית ממוצעת מתוך הצטברות של 5 שנים
             annualized = ((1.0 + v_5y / 100.0) ** (1.0 / 5.0) - 1.0) * 100.0
         elif v_3y is not None:
-            # גזירת תשואה שנתית ממוצעת מתוך הצטברות של 3 שנים
             annualized = ((1.0 + v_3y / 100.0) ** (1.0 / 3.0) - 1.0) * 100.0
         else:
             annualized = None
@@ -195,7 +184,6 @@ def main(page: ft.Page):
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
 
-    # קריאת נתונים מקובץ מקומי 
     local_state = {}
     try:
         if os.path.exists(SAVE_FILE):
@@ -209,10 +197,9 @@ def main(page: ft.Page):
     invested_funds = set(local_state.get("invested_funds", []))
     funds_list = []
     
-    sort_column_idx = local_state.get("sort_column_idx", 1) # ברירת מחדל: ציון חכם
+    sort_column_idx = local_state.get("sort_column_idx", 1)
     sort_ascending = local_state.get("sort_ascending", False)
 
-    # רכיבי UI
     status_text = ft.Text("⏳ מוריד נתונים עדכניים ממשרד האוצר... אנא המתן.", color=ft.Colors.ORANGE_700, weight=ft.FontWeight.BOLD)
     debug_text = ft.Text(f"מצב שמירה: ממתין לשינויים... ({SAVE_FILE})", size=10, color=ft.Colors.GREY_400)
     
@@ -225,7 +212,6 @@ def main(page: ft.Page):
     
     search_results_column = ft.Column(visible=False)
 
-    # יועץ השקעות חכם - רכיבי פרופיל
     horizon_dropdown = ft.Dropdown(
         label="טווח השקעה מתוכנן",
         options=[
@@ -294,14 +280,12 @@ def main(page: ft.Page):
         except Exception as e:
             debug_text.value = f"❌ שגיאת הרשאות כתיבה לאנדרואיד: {str(e)}"
             debug_text.color = ft.Colors.RED_500
-        
         page.update()
 
     def update_profile():
         save_state()
         refresh_table()
 
-    # הגדרת פונקציות השינוי לרכיבי הבחירה אחרי שהפונקציה update_profile קיימת
     horizon_dropdown.on_change = lambda e: update_profile()
     risk_dropdown.on_change = lambda e: update_profile()
 
@@ -311,13 +295,11 @@ def main(page: ft.Page):
 
     def on_delete_btn_click(e):
         if not data_table.show_checkbox_column:
-            # מעבר למצב בחירה
             data_table.show_checkbox_column = True
             delete_btn.text = "⏳ ממתין לבחירת מסלולים..."
             cancel_delete_btn.visible = True
             page.update()
         else:
-            # מחיקה בפועל אם נבחרו שורות
             selected_funds = [row.data for row in data_table.rows if row.selected]
             if selected_funds:
                 for f in selected_funds:
@@ -325,13 +307,12 @@ def main(page: ft.Page):
                         added_funds.remove(f)
                     if f in invested_funds:
                         invested_funds.remove(f)
-                
-                # חזרה למצב רגיל
-                data_table.show_checkbox_column = False
-                delete_btn.text = "➖ בחר מסלולים למחיקה"
-                cancel_delete_btn.visible = False
                 save_state()
-                refresh_table()
+                
+            data_table.show_checkbox_column = False
+            delete_btn.text = "➖ בחר מסלולים למחיקה"
+            cancel_delete_btn.visible = False
+            refresh_table()
 
     def on_cancel_delete_click(e):
         data_table.show_checkbox_column = False
@@ -340,9 +321,12 @@ def main(page: ft.Page):
         for row in data_table.rows:
             row.selected = False
         page.update()
-        
+
     def on_row_select(e):
-        e.control.selected = (e.data == "true")
+        # טיפול קשיח בערך הבוליאני שמגיע מ-Flet באנדרואיד כדי למנוע קריאה שגויה של הסטטוס
+        is_selected = str(e.data).lower() in ["true", "1", "t", "yes"]
+        e.control.selected = is_selected
+        
         selected_count = sum(1 for row in data_table.rows if row.selected)
         if selected_count > 0:
             delete_btn.text = "🗑️ מחק מסלולים נבחרים"
@@ -353,27 +337,31 @@ def main(page: ft.Page):
     delete_btn.on_click = on_delete_btn_click
     cancel_delete_btn.on_click = on_cancel_delete_click
 
-    # --- יצוא ויבוא הגדרות (File Pickers) ---
-    def on_export_result(e: ft.FilePickerResultEvent):
-        if e.path:
-            try:
-                state_dict = {
-                    "added_funds": added_funds,
-                    "invested_funds": list(invested_funds),
-                    "sort_column_idx": sort_column_idx,
-                    "sort_ascending": sort_ascending,
-                    "horizon": horizon_dropdown.value,
-                    "risk": risk_dropdown.value
-                }
-                with open(e.path, "w", encoding="utf-8") as f:
-                    json.dump(state_dict, f, ensure_ascii=False)
-                status_text.value = f"✅ ההגדרות יוצאו בהצלחה!"
-                status_text.color = ft.Colors.GREEN_700
-                page.update()
-            except Exception as ex:
-                status_text.value = f"❌ שגיאה ביצוא: {str(ex)}"
-                status_text.color = ft.Colors.RED_600
-                page.update()
+    # --- מנגנון יצוא ויבוא ---
+    def export_to_downloads(e):
+        try:
+            download_dir = "/storage/emulated/0/Download"
+            if not os.path.exists(download_dir):
+                download_dir = os.path.expanduser("~") 
+                
+            backup_path = os.path.join(download_dir, "gedroeid_backup.json")
+            state_dict = {
+                "added_funds": added_funds,
+                "invested_funds": list(invested_funds),
+                "sort_column_idx": sort_column_idx,
+                "sort_ascending": sort_ascending,
+                "horizon": horizon_dropdown.value,
+                "risk": risk_dropdown.value
+            }
+            with open(backup_path, "w", encoding="utf-8") as f:
+                json.dump(state_dict, f, ensure_ascii=False)
+                
+            status_text.value = f"✅ הגדרות גובו בהצלחה לתיקיית ההורדות (Download)!"
+            status_text.color = ft.Colors.GREEN_700
+        except Exception as ex:
+            status_text.value = f"❌ שגיאה ביצוא: {str(ex)}"
+            status_text.color = ft.Colors.RED_600
+        page.update()
 
     def on_import_result(e: ft.FilePickerResultEvent):
         if e.files and len(e.files) > 0:
@@ -400,15 +388,13 @@ def main(page: ft.Page):
                 
                 status_text.value = "✅ ההגדרות יובאו בהצלחה!"
                 status_text.color = ft.Colors.GREEN_700
-                page.update()
             except Exception as ex:
                 status_text.value = f"❌ שגיאה ביבוא: {str(ex)}"
                 status_text.color = ft.Colors.RED_600
-                page.update()
+            page.update()
 
-    export_picker = ft.FilePicker(on_result=on_export_result)
     import_picker = ft.FilePicker(on_result=on_import_result)
-    page.overlay.extend([export_picker, import_picker])
+    page.overlay.append(import_picker)
 
     def on_sort(e: ft.DataColumnSortEvent):
         nonlocal sort_column_idx, sort_ascending
@@ -428,7 +414,7 @@ def main(page: ft.Page):
 
     data_table = ft.DataTable(
         columns=columns,
-        show_checkbox_column=False, # מתחילים מוסתר עד שלוחצים "בחר מסלולים" 
+        show_checkbox_column=False, 
         sort_column_index=sort_column_idx,
         sort_ascending=sort_ascending,
         heading_row_color=ft.Colors.BLUE_GREY_50,
@@ -453,7 +439,6 @@ def main(page: ft.Page):
 
         valid_funds = [f for f in added_funds if not df_clean[df_clean['שם ומספר מסלול'] == f].empty]
         
-        # חישוב סטטיסטיקות עבור השוואה וממוצעים
         stats = {}
         for col_name, _ in col_specs:
             if col_name in ['שם ומספר מסלול', 'מושקע', 'ציון חכם']: continue
@@ -464,7 +449,6 @@ def main(page: ft.Page):
             else:
                 stats[col_name] = {'min': 0, 'max': 0, 'avg': 0}
 
-        # מציאת המצטיינים לתגים (Badges) תוך דרישה לתשואה חיובית באמת
         def get_winner(col, require_positive=False):
             if not valid_funds: return None
             best_f, max_v = None, -9999
@@ -472,10 +456,8 @@ def main(page: ft.Page):
                 v = safe_to_float(df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0].get(col))
                 if v is not None and v > max_v:
                     max_v = v; best_f = f
-                    
             if require_positive and max_v <= 0:
                 return None
-                
             return best_f
 
         winners = {
@@ -484,7 +466,6 @@ def main(page: ft.Page):
             'rocket': get_winner('תשואה חודש אחרון', require_positive=True)
         }
 
-        # הגדרת משקלים לציון החכם לפי פרופיל
         h_val, r_val = horizon_dropdown.value, risk_dropdown.value
         w_12m, w_3y, w_5y, w_sharpe = 0.1, 0.4, 0.3, 0.2
         
@@ -496,11 +477,9 @@ def main(page: ft.Page):
         elif "אגרסיבי" in r_val:
             w_sharpe = 0.0; w_12m += 0.05; w_3y += 0.1; w_5y += 0.05
             
-        # נרמול ל-1.0
         total_w = w_12m + w_3y + w_5y + w_sharpe
         if total_w > 0: w_12m /= total_w; w_3y /= total_w; w_5y /= total_w; w_sharpe /= total_w
 
-        # חישוב הציון לכל קופה
         scores = {}
         for f in valid_funds:
             score = 0
@@ -528,7 +507,6 @@ def main(page: ft.Page):
             advisor_text.value = "הוסף קופות לטבלה כדי לקבל המלצה חכמה."
             advisor_text.color = ft.Colors.BLUE_700
 
-        # מיון הנתונים לטבלה
         sort_col_name = col_specs[sort_column_idx][0]
         
         def get_sort_val(fund_name):
@@ -542,7 +520,6 @@ def main(page: ft.Page):
 
         sorted_funds = sorted(added_funds, key=get_sort_val, reverse=not sort_ascending)
         
-        # שמירת הבחירה הקיימת לפני רינדור מחדש של השורות
         current_selected = set()
         if data_table.rows:
             current_selected = {row.data for row in data_table.rows if row.selected}
@@ -589,7 +566,6 @@ def main(page: ft.Page):
                     
                     display_text = f"{num_val:.2f}%" if is_percent else f"{num_val:.2f}"
                     
-                    # חיווי אוטומטי לעומת ממוצע הענף (רק אם יש יותר מקופה אחת להשוואה)
                     if len(valid_funds) > 1:
                         if is_above_avg:
                             display_text += " ▲"
@@ -605,7 +581,6 @@ def main(page: ft.Page):
                     cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
             
             row_color = ft.Colors.GREEN_50 if fund_name in invested_funds else ft.Colors.TRANSPARENT
-            
             rows.append(ft.DataRow(
                 cells=cells, 
                 data=fund_name, 
@@ -646,14 +621,11 @@ def main(page: ft.Page):
         added_funds.clear()
         invested_funds.clear()
         save_state()
-        
-        # איפוס מצב המחיקה אם הופעל
         data_table.show_checkbox_column = False
         delete_btn.text = "➖ בחר מסלולים למחיקה"
         cancel_delete_btn.visible = False
         refresh_table()
 
-    # משיכת נתונים ברקע
     def fetch_data_task():
         nonlocal df_clean, funds_list
         try:
@@ -703,7 +675,6 @@ def main(page: ft.Page):
 
     legend_text = ft.Text("מקרא תגים: 🌟 מלך הביצועים (3/5 שנים) | 🛡️ הכי יציבה (שארפ) | 🚀 צומחת (חודש אחרון) | ▲/▼ מעל/מתחת לממוצע", size=11, color=ft.Colors.GREY_600)
 
-    # עיצוב המסך הראשי
     page.add(
         ft.Column([
             ft.Text("📊 השוואת קופות גמל להשקעה", size=24, weight=ft.FontWeight.BOLD),
@@ -716,8 +687,8 @@ def main(page: ft.Page):
                 delete_btn,
                 cancel_delete_btn,
                 ft.ElevatedButton("🗑️ נקה טבלה", on_click=clear_table, bgcolor=ft.Colors.RED_50, color=ft.Colors.RED_900),
-                ft.ElevatedButton("📤 יצוא הגדרות", on_click=lambda _: export_picker.save_file(file_name="gedroeid_backup.json", allowed_extensions=["json"])),
-                ft.ElevatedButton("📥 יבוא הגדרות", on_click=lambda _: import_picker.pick_files(allowed_extensions=["json"]))
+                ft.ElevatedButton("📤 יצוא ל-Download", on_click=export_to_downloads, bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900),
+                ft.ElevatedButton("📥 יבוא הגדרות", on_click=lambda _: import_picker.pick_files(file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=["json"]), bgcolor=ft.Colors.BLUE_50, color=ft.Colors.BLUE_900)
             ], wrap=True),
             legend_text,
             table_container,
@@ -725,7 +696,6 @@ def main(page: ft.Page):
         ], expand=True)
     )
 
-    # התחלת טעינת נתונים
     threading.Thread(target=fetch_data_task, daemon=True).start()
 
 if __name__ == '__main__':
