@@ -359,20 +359,24 @@ def main(page: ft.Page):
             else:
                 stats[col_name] = {'min': 0, 'max': 0, 'avg': 0}
 
-        # מציאת המצטיינים לתגים (Badges)
-        def get_winner(col):
+        # מציאת המצטיינים לתגים (Badges) תוך דרישה לתשואה חיובית באמת
+        def get_winner(col, require_positive=False):
             if not valid_funds: return None
             best_f, max_v = None, -9999
             for f in valid_funds:
                 v = safe_to_float(df_clean[df_clean['שם ומספר מסלול'] == f].iloc[0].get(col))
                 if v is not None and v > max_v:
                     max_v = v; best_f = f
+                    
+            if require_positive and max_v <= 0:
+                return None
+                
             return best_f
 
         winners = {
-            'king': get_winner('תשואה 5 שנים') or get_winner('תשואה 3 שנים'),
+            'king': get_winner('תשואה 5 שנים', require_positive=True) or get_winner('תשואה 3 שנים', require_positive=True),
             'stable': get_winner('מדד שארפ'),
-            'rocket': get_winner('תשואה 12 חודשים אחרונים')
+            'rocket': get_winner('תשואה חודש אחרון', require_positive=True)
         }
 
         # הגדרת משקלים לציון החכם לפי פרופיל
