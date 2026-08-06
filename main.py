@@ -218,13 +218,24 @@ def process_data(df):
         df['Search_Key'] = df[name_col].astype(str)
         df['תשואה 12 חודשים אחרונים'] = None
 
+    if 'STOCK_MARKET_EXPOSURE' in df.columns and 'TOTAL_ASSETS' in df.columns:
+        stock_exposure = pd.to_numeric(df['STOCK_MARKET_EXPOSURE'], errors='coerce')
+        total_assets = pd.to_numeric(df['TOTAL_ASSETS'], errors='coerce')
+        exposure_level = (stock_exposure / total_assets.replace(0, pd.NA)) * 100.0
+        df['EQUITY_EXPOSURE_LEVEL'] = exposure_level
+    else:
+        df['EQUITY_EXPOSURE_LEVEL'] = None
+
     metric_sources = {
         'תשואה חודש אחרון': ['TSUA_HODESH_AHARON', 'MONTHLY_YIELD'],
         'תשואה 12 חודשים אחרונים': ['תשואה 12 חודשים אחרונים'],
         'תשואה שנה אחרונה': ['TSUA_SHANA_AHARONA', 'YEAR_TO_DATE_YIELD'],
         'תשואה 3 שנים': ['TSUA_3_SHANIM', 'YIELD_TRAILING_3_YRS'],
         'תשואה 5 שנים': ['TSUA_5_SHANIM', 'YIELD_TRAILING_5_YRS'],
-        'מדד שארפ': ['SHARPE_RATIO', 'SHARPE', 'SHARPE_INDEX']
+        'מדד שארפ': ['SHARPE_RATIO', 'SHARPE', 'SHARPE_INDEX'],
+        'רמת חשיפה מנייתית (%)': ['EQUITY_EXPOSURE_LEVEL'],
+        'סטיית תקן': ['STANDARD_DEVIATION'],
+        'היקף נכסים (מ׳ ש״ח)': ['TOTAL_ASSETS'],
     }
 
     output = pd.DataFrame()
@@ -248,6 +259,46 @@ def process_data(df):
         avg_annual_returns.append(annualized)
 
     output['תשואה שנתית ממוצעת (3/5 שנים)'] = avg_annual_returns
+
+    # ציון בנצ'מרק יחסי: השוואה לקבוצת ההשקעה של המסלול (SPECIALIZATION / SUB_SPECIALIZATION)
+    specialization_series = df['SPECIALIZATION'] if 'SPECIALIZATION' in df.columns else pd.Series(["לא מסווג"] * len(df), index=df.index)
+    sub_specialization_series = df['SUB_SPECIALIZATION'] if 'SUB_SPECIALIZATION' in df.columns else pd.Series(["לא מסווג"] * len(df), index=df.index)
+
+    benchmark_frame = pd.DataFrame(
+        {
+            'specialization': specialization_series.fillna("לא מסווג").astype(str),
+            'sub_specialization': sub_specialization_series.fillna("לא מסווג").astype(str),
+            'avg_annual': pd.to_numeric(output['תשואה שנתית ממוצעת (3/5 שנים)'], errors='coerce'),
+            'sharpe': pd.to_numeric(output['מדד שארפ'], errors='coerce'),
+            'std': pd.to_numeric(output['סטיית תקן'], errors='coerce'),
+        }
+    )
+
+    benchmark_scores = []
+    grouped = benchmark_frame.groupby(['specialization', 'sub_specialization'], dropna=False)
+    for idx, row in benchmark_frame.iterrows():
+        grp = grouped.get_group((row['specialization'], row['sub_specialization']))
+
+        def norm(value, series, invert=False):
+            if pd.isna(value):
+                return 50.0
+            valid = series.dropna()
+            if valid.empty:
+                return 50.0
+            low = valid.min()
+            high = valid.max()
+            if high == low:
+                return 50.0
+            score = 100.0 * (float(value) - float(low)) / (float(high) - float(low))
+            return 100.0 - score if invert else score
+
+        score_avg = norm(row['avg_annual'], grp['avg_annual'])
+        score_sharpe = norm(row['sharpe'], grp['sharpe'])
+        score_std = norm(row['std'], grp['std'], invert=True)
+
+        benchmark_scores.append(0.5 * score_avg + 0.35 * score_sharpe + 0.15 * score_std)
+
+    output["ציון בנצ'מרק"] = benchmark_scores
 
     df_clean = output
     if 'שם ומספר מסלול' in df_clean.columns:
@@ -313,7 +364,7 @@ def main(page: ft.Page):
         expand=True
     )
 
-    advisor_text = ft.Text("הוסף קופות לטבלה כדי לקבל המלצה חכמה.", color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD)
+    advisor_text = ft.Text("הוסף קופות לטבלה כדי לראות את המובילים לפי קטגוריות חשיפה.", color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD)
 
     advisor_card = ft.Card(
         elevation=2,
@@ -321,9 +372,8 @@ def main(page: ft.Page):
             padding=15,
             bgcolor=ft.Colors.BLUE_50,
             content=ft.Column([
-                ft.Text("🤖 יועץ השקעות אישי", weight=ft.FontWeight.BOLD, size=18, color=ft.Colors.BLUE_900),
-                ft.Text("בחר את הפרופיל שלך והמערכת תחשב 'ציון חכם' (0-100) לכל קופה בטבלה:", size=13),
-                ft.Row([horizon_dropdown, risk_dropdown]),
+                ft.Text("🏆 מובילי רווחיות לפי קטגוריות חשיפה", weight=ft.FontWeight.BOLD, size=18, color=ft.Colors.BLUE_900),
+                ft.Text("בכל קטגוריה מוצג המסלול עם התשואה השנתית הממוצעת הגבוהה ביותר (3/5 שנים).", size=13),
                 advisor_text
             ])
         )
@@ -338,7 +388,11 @@ def main(page: ft.Page):
         ('תשואה 3 שנים', True),
         ('תשואה 5 שנים', True),
         ('תשואה שנתית ממוצעת (3/5 שנים)', True),
+        ('רמת חשיפה מנייתית (%)', True),
+        ('סטיית תקן', False),
         ('מדד שארפ', False),
+        ('היקף נכסים (מ׳ ש״ח)', False),
+        ("ציון בנצ'מרק", False),
         ('מושקע', False) 
     ]
 
@@ -522,7 +576,7 @@ def main(page: ft.Page):
         columns.append(
             ft.DataColumn(
                 ft.Text(col_name, weight=ft.FontWeight.BOLD),
-                on_sort=on_sort if i < 9 else None
+                on_sort=on_sort if i < (len(col_specs) - 1) else None
             )
         )
 
@@ -620,11 +674,71 @@ def main(page: ft.Page):
             scores[f] = score
 
         if scores:
-            best_f = max(scores, key=scores.get)
-            advisor_text.value = f"🎯 המסלול המומלץ ביותר עבורך: {best_f} (ציון: {scores[best_f]:.0f}/100)"
-            advisor_text.color = ft.Colors.GREEN_700
+            def best_by_avg_return(candidates):
+                valid = []
+                for fund in candidates:
+                    avg_return = safe_to_float(fund_index[fund].get('תשואה שנתית ממוצעת (3/5 שנים)'))
+                    if avg_return is not None:
+                        valid.append((fund, avg_return))
+                if not valid:
+                    return None, None
+                best_fund, best_avg = max(valid, key=lambda item: item[1])
+                return best_fund, best_avg
+
+            exposure_pairs = []
+            for fund_name in valid_funds:
+                exposure = safe_to_float(fund_index[fund_name].get('רמת חשיפה מנייתית (%)'))
+                if exposure is not None:
+                    exposure_pairs.append((fund_name, exposure))
+
+            rec_equity = rec_medium = rec_solid = None
+            avg_equity = avg_medium = avg_solid = None
+
+            if exposure_pairs:
+                sorted_by_exposure = sorted(exposure_pairs, key=lambda item: item[1])
+                ordered_funds = [fund for fund, _ in sorted_by_exposure]
+                n = len(ordered_funds)
+
+                if n >= 3:
+                    third = max(1, n // 3)
+                    solid_group = ordered_funds[:third]
+                    equity_group = ordered_funds[-third:]
+                    middle_group = ordered_funds[third:n - third]
+                    if not middle_group:
+                        middle_group = [ordered_funds[n // 2]]
+                else:
+                    solid_group = [ordered_funds[0]]
+                    equity_group = [ordered_funds[-1]]
+                    middle_group = [ordered_funds[n // 2]]
+
+                rec_equity, avg_equity = best_by_avg_return(equity_group)
+                rec_medium, avg_medium = best_by_avg_return(middle_group)
+                rec_solid, avg_solid = best_by_avg_return(solid_group)
+            else:
+                top_by_avg = []
+                for fund_name in valid_funds:
+                    avg_return = safe_to_float(fund_index[fund_name].get('תשואה שנתית ממוצעת (3/5 שנים)'))
+                    if avg_return is not None:
+                        top_by_avg.append((fund_name, avg_return))
+                top_by_avg.sort(key=lambda item: item[1], reverse=True)
+
+                if top_by_avg:
+                    rec_equity, avg_equity = top_by_avg[0]
+                    rec_medium, avg_medium = top_by_avg[1] if len(top_by_avg) > 1 else top_by_avg[0]
+                    rec_solid, avg_solid = top_by_avg[2] if len(top_by_avg) > 2 else top_by_avg[0]
+
+            lines = []
+            if rec_equity:
+                lines.append(f"⚡ הכי מנייתי: {rec_equity} (ממוצע שנתי: {avg_equity:.2f}%)")
+            if rec_medium:
+                lines.append(f"⚖️ בינוני: {rec_medium} (ממוצע שנתי: {avg_medium:.2f}%)")
+            if rec_solid:
+                lines.append(f"🛡️ הכי סולידי: {rec_solid} (ממוצע שנתי: {avg_solid:.2f}%)")
+
+            advisor_text.value = "\n".join(lines) if lines else "הוסף קופות לטבלה כדי לראות את המובילים לפי קטגוריות חשיפה."
+            advisor_text.color = ft.Colors.GREEN_700 if lines else ft.Colors.BLUE_700
         else:
-            advisor_text.value = "הוסף קופות לטבלה כדי לקבל המלצה חכמה."
+            advisor_text.value = "הוסף קופות לטבלה כדי לראות את המובילים לפי קטגוריות חשיפה."
             advisor_text.color = ft.Colors.BLUE_700
 
         sort_col_name = col_specs[sort_column_idx][0]
@@ -662,6 +776,15 @@ def main(page: ft.Page):
                     sc = scores.get(fund_name, 0)
                     color = ft.Colors.GREEN_600 if sc >= 80 else ft.Colors.ORANGE_600 if sc >= 50 else ft.Colors.RED_600
                     cells.append(ft.DataCell(ft.Text(f"{sc:.0f}", color=color, weight=ft.FontWeight.BOLD)))
+                    continue
+
+                if col_name == "ציון בנצ'מרק":
+                    benchmark_score = safe_to_float(fund_row.get(col_name))
+                    if benchmark_score is None:
+                        cells.append(ft.DataCell(ft.Text("---", color=ft.Colors.BLACK)))
+                    else:
+                        color = ft.Colors.GREEN_600 if benchmark_score >= 70 else ft.Colors.ORANGE_600 if benchmark_score >= 50 else ft.Colors.RED_600
+                        cells.append(ft.DataCell(ft.Text(f"{benchmark_score:.0f}", color=color, weight=ft.FontWeight.BOLD)))
                     continue
 
                 if col_name == 'שם ומספר מסלול':
@@ -710,6 +833,7 @@ def main(page: ft.Page):
             # הוסר צבע הרקע כדי למנוע דריסה של צבעי הטקסט באנדרואיד
             rows.append(ft.DataRow(
                 cells=cells, 
+                color=ft.Colors.AMBER_50 if fund_name in invested_funds else None,
                 data=fund_name,
                 selected=(fund_name in current_selected),
                 on_select_change=on_row_select
@@ -792,15 +916,21 @@ def main(page: ft.Page):
             session = build_retry_session()
             search_url = "https://data.gov.il/api/3/action/package_search?q=title:גמל-נט"
             res = session.get(search_url, timeout=(5, 15)).json()
-            resource_id = "079cbab3-9c86-455b-b9d9-c454eefbebb6"
+            resource_id = None
 
             if isinstance(res, dict) and res.get('success') and res.get('result', {}).get('results'):
                 resources = res['result']['results'][0].get('resources', [])
-                for r in resources:
-                    name = str(r.get('name', ''))
-                    if '2024' in name or '2025' in name or 'היום' in name:
-                        resource_id = r.get('id', resource_id)
-                        break
+                csv_resources = [
+                    r for r in resources
+                    if str(r.get('format', '')).upper() == 'CSV' and r.get('id')
+                ]
+
+                if csv_resources:
+                    csv_resources.sort(key=lambda r: str(r.get('last_modified', '')), reverse=True)
+                    resource_id = csv_resources[0].get('id')
+
+            if not resource_id:
+                raise ValueError("לא נמצא משאב CSV עדכני במאגר גמל-נט")
 
             url = f"https://data.gov.il/api/3/action/datastore_search?resource_id={resource_id}&limit=40000"
             data_res = session.get(url, timeout=(10, 30)).json()
