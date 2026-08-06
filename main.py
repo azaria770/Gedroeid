@@ -684,20 +684,28 @@ def main(page: ft.Page):
                     is_below_avg = avg is not None and num_val < avg
 
                     display_text = f"{num_val:.2f}%" if is_percent else f"{num_val:.2f}"
+                    text_color = ft.Colors.GREEN_600 if num_val > 0 else ft.Colors.RED_600 if num_val < 0 else ft.Colors.BLACK
 
-                    if len(valid_funds) > 1:
+                    if len(valid_funds) > 1 and avg is not None:
                         if is_above_avg:
-                            display_text += " ▲"
-                            text_color = ft.Colors.GREEN_600
+                            cell_bgcolor = ft.Colors.GREEN_50
                         elif is_below_avg:
-                            display_text += " ▼"
-                            text_color = ft.Colors.RED_600
+                            cell_bgcolor = ft.Colors.RED_50
                         else:
-                            text_color = ft.Colors.BLACK
+                            cell_bgcolor = None
                     else:
-                        text_color = ft.Colors.GREEN_600 if num_val > 0 else ft.Colors.RED_600 if num_val < 0 else ft.Colors.BLACK
+                        cell_bgcolor = None
 
-                    cells.append(ft.DataCell(ft.Text(display_text, color=text_color)))
+                    cells.append(
+                        ft.DataCell(
+                            ft.Container(
+                                content=ft.Text(display_text, color=text_color),
+                                bgcolor=cell_bgcolor,
+                                border_radius=6,
+                                padding=6,
+                            )
+                        )
+                    )
 
             # הוסר צבע הרקע כדי למנוע דריסה של צבעי הטקסט באנדרואיד
             rows.append(ft.DataRow(
@@ -829,7 +837,7 @@ def main(page: ft.Page):
 
         page.update()
 
-    legend_text = ft.Text("מקרא תגים: 🌟 מלך הביצועים (3/5 שנים) | 🛡️ הכי יציבה (שארפ) | 🚀 צומחת (חודש אחרון) | ▲/▼ מעל/מתחת לממוצע", size=11, color=ft.Colors.GREY_600)
+    legend_text = ft.Text("מקרא תגים: 🌟 מלך הביצועים (3/5 שנים) | 🛡️ הכי יציבה (שארפ) | 🚀 צומחת (חודש אחרון) | רקע ירקרק/אדמדם ביחס לממוצע", size=11, color=ft.Colors.GREY_600)
 
     page.add(
         ft.Column([
