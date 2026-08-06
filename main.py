@@ -163,13 +163,24 @@ def process_data(df):
         src = next((col for col in candidates if col in df.columns), None)
         output[label] = df[src] if src else None
 
-    return_cols = ['תשואה חודש אחרון', 'תשואה 12 חודשים אחרונים', 'תשואה שנה אחרונה', 'תשואה 3 שנים', 'תשואה 5 שנים']
-    avg_values = []
+    # חישוב תשואה שנתית ממוצעת בראייה של 3/5 שנים (CAGR)
+    avg_annual_returns = []
     for _, row in output.iterrows():
-        numeric_vals = [safe_to_float(row.get(col)) for col in return_cols]
-        numeric_vals = [val for val in numeric_vals if val is not None]
-        avg_values.append(sum(numeric_vals) / len(numeric_vals) if numeric_vals else None)
-    output['ממוצע תשואות'] = avg_values
+        v_5y = safe_to_float(row.get('תשואה 5 שנים'))
+        v_3y = safe_to_float(row.get('תשואה 3 שנים'))
+        
+        if v_5y is not None:
+            # גזירת תשואה שנתית ממוצעת מתוך הצטברות של 5 שנים
+            annualized = ((1.0 + v_5y / 100.0) ** (1.0 / 5.0) - 1.0) * 100.0
+        elif v_3y is not None:
+            # גזירת תשואה שנתית ממוצעת מתוך הצטברות של 3 שנים
+            annualized = ((1.0 + v_3y / 100.0) ** (1.0 / 3.0) - 1.0) * 100.0
+        else:
+            annualized = None
+            
+        avg_annual_returns.append(annualized)
+
+    output['תשואה שנתית ממוצעת (3/5 שנים)'] = avg_annual_returns
 
     df_clean = output
     if 'שם ומספר מסלול' in df_clean.columns:
@@ -261,7 +272,7 @@ def main(page: ft.Page):
         ('תשואה שנה אחרונה', True),
         ('תשואה 3 שנים', True),
         ('תשואה 5 שנים', True),
-        ('ממוצע תשואות', True),
+        ('תשואה שנתית ממוצעת (3/5 שנים)', True),
         ('מדד שארפ', False),
         ('מושקע', False) 
     ]
