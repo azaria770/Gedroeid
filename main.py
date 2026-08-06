@@ -261,6 +261,7 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 20
     page.scroll = ft.ScrollMode.AUTO
+    is_mobile = page.platform.is_mobile()
 
     local_state = {}
     try:
@@ -414,10 +415,11 @@ def main(page: ft.Page):
     cancel_delete_btn.on_click = on_cancel_delete_click
 
     # --- מנגנון יצוא ויבוא מתוקן ---
-    export_picker = ft.FilePicker()
-    import_picker = ft.FilePicker()
-    page.services.extend([export_picker, import_picker])
-    page.update()
+    export_picker = ft.FilePicker() if not is_mobile else None
+    import_picker = ft.FilePicker() if not is_mobile else None
+    if export_picker and import_picker:
+        page.services.extend([export_picker, import_picker])
+        page.update()
 
     async def export_settings(_: ft.ControlEvent):
         state_dict = {
@@ -432,18 +434,24 @@ def main(page: ft.Page):
         json_bytes = json_str.encode("utf-8")
 
         try:
-            save_path = await export_picker.save_file(file_name="gedroeid_backup.json")
-            if save_path:
-                with open(save_path, "wb") as f:
-                    f.write(json_bytes)
+            if is_mobile or export_picker is None:
+                backup_path = os.path.join(os.path.dirname(SAVE_FILE) or os.getcwd(), "gedroeid_backup.json")
+                atomic_write_json(backup_path, state_dict)
                 status_text.value = "✅ הגדרות גובו בהצלחה למיקום הנבחר!"
                 status_text.color = ft.Colors.GREEN_700
             else:
-                page.set_clipboard(json_str)
-                status_text.value = "⚠️ בחירת מיקום בוטלה. הנתונים הועתקו ללוח!"
-                status_text.color = ft.Colors.ORANGE_700
+                save_path = await export_picker.save_file(file_name="gedroeid_backup.json")
+                if save_path:
+                    with open(save_path, "wb") as f:
+                        f.write(json_bytes)
+                    status_text.value = "✅ הגדרות גובו בהצלחה למיקום הנבחר!"
+                    status_text.color = ft.Colors.GREEN_700
+                else:
+                    await ft.Clipboard().set(json_str)
+                    status_text.value = "⚠️ בחירת מיקום בוטלה. הנתונים הועתקו ללוח!"
+                    status_text.color = ft.Colors.ORANGE_700
         except Exception:
-            page.set_clipboard(json_str)
+            await ft.Clipboard().set(json_str)
             status_text.value = "⚠️ שגיאת הרשאה בשמירה. הנתונים הועתקו ללוח (Clipboard)!"
             status_text.color = ft.Colors.ORANGE_700
 
@@ -453,22 +461,30 @@ def main(page: ft.Page):
         nonlocal sort_column_idx, sort_ascending
 
         try:
-            files = await import_picker.pick_files(
-                file_type=ft.FilePickerFileType.CUSTOM,
-                allowed_extensions=["json"],
-                with_data=True,
-            )
-            if not files:
-                return
-
-            selected_file = files[0]
-            if selected_file.bytes:
-                imported_state = json.loads(selected_file.bytes.decode("utf-8"))
-            elif selected_file.path:
-                with open(selected_file.path, "r", encoding="utf-8") as f:
-                    imported_state = json.load(f)
+            if is_mobile or import_picker is None:
+                imported_state = load_json_file(
+                    os.path.join(os.path.dirname(SAVE_FILE) or os.getcwd(), "gedroeid_backup.json"),
+                    default=None,
+                )
+                if not isinstance(imported_state, dict):
+                    raise ValueError("לא נמצא קובץ גיבוי פנימי לייבוא")
             else:
-                raise ValueError("לא נמצא קובץ תקף לייבוא")
+                files = await import_picker.pick_files(
+                    file_type=ft.FilePickerFileType.CUSTOM,
+                    allowed_extensions=["json"],
+                    with_data=True,
+                )
+                if not files:
+                    return
+
+                selected_file = files[0]
+                if selected_file.bytes:
+                    imported_state = json.loads(selected_file.bytes.decode("utf-8"))
+                elif selected_file.path:
+                    with open(selected_file.path, "r", encoding="utf-8") as f:
+                        imported_state = json.load(f)
+                else:
+                    raise ValueError("לא נמצא קובץ תקף לייבוא")
 
             added_funds.clear()
             added_funds.extend(imported_state.get("added_funds", []))
